@@ -310,12 +310,13 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
                     lines.append(line)
             env_file.write_text("\n".join(lines))
             print(f"  \u2705 Generated .env with {sum(1 for l in lines if '=' in l)} entries")
-            plan["_env_source"] = "auto_generated"
         else:
             print("  \u26a0\ufe0f  No .env.example found to generate from")
 
     print_step(2, 8, "Analyzing project structure...")
     plan = analyze_project(project_path, repo_url=repo_url)
+    if generate_env:
+        plan["_env_source"] = "auto_generated"
     if not no_api_key:
         agent_insights = agent_analyze_project(project_path, plan)
         if agent_insights:
