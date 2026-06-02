@@ -39,7 +39,7 @@ def print_banner():
         banner_text = Text()
         banner_text.append("╔══════════════════════════════════════╗\n", style="cyan")
         banner_text.append("║", style="cyan")
-        banner_text.append("     ⚡ Runit v1.2.0               ", style="bold cyan")
+        banner_text.append("     ⚡ Runit v2.0.1               ", style="bold cyan")
         banner_text.append("║\n", style="cyan")
         banner_text.append("║", style="cyan")
         banner_text.append("  AI-Powered Repo Execution Agent     ", style="dim white")
@@ -55,7 +55,7 @@ def print_banner():
     else:
         print("")
         print("  ╔══════════════════════════════════════╗")
-        print("  ║     ⚡ Runit v1.2.0               ║")
+        print("  ║     ⚡ Runit v2.0.1               ║")
         print("  ║  AI-Powered Repo Execution Agent     ║")
         print("  ║  \"Make any project runnable\"         ║")
         print("  ╚══════════════════════════════════════╝")

@@ -9,7 +9,7 @@ from runit.cli import (
     print_keystore, _console, AUTO_YES, FORCE_PLAIN,
 )
 from runit.project_loader import load_project, get_project_name, cleanup, is_github_url
-from runit.orchestrator import Orchestrator
+from runit.orchestrator import Pipeline
 from runit.process_monitor import ProcessMonitor
 from runit.environment import detect_env, is_notebook_env
 from runit.skills import SKILLS_REGISTRY
@@ -111,21 +111,21 @@ def cmd_run(target: str, token: str | None = None,
     print(f"  \U0001f4cd  Path: {project_path}")
     print()
 
-    print_step(1, 3, "Agent setting up project...")
+    print_step(1, 1, "Setting up project...")
 
-    orch = Orchestrator(
+    pipe = Pipeline(
         project_path=project_path,
         env_type=env_type,
         auto_yes=AUTO_YES,
         max_retries=max_retries,
-        max_steps=max_steps,
     )
-    result = orch.run()
+    result = pipe.run()
+    pipe.cleanup()
 
     if result.get("status") == "success":
         return 0
     else:
-        print(f"\n  \u274c  Setup failed. Try running with --max-steps 100 for deeper analysis.")
+        print(f"\n  \u274c  Setup failed. Check the error above.")
         return 1
 
 
