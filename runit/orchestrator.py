@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import time
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -69,12 +71,18 @@ class Pipeline:
         result = self._run_project()
 
         if result.get("ok"):
+            public_url = self._start_cloudflare_tunnel(result.get("port"))
+            if public_url:
+                result["public_url"] = public_url
             self._dashboard(result)
             return {"status": "success", "result": result}
 
         print("  \u274c  Automatic setup failed. Trying AI agent...")
         agent_result = self._agent_repair(result.get("error", ""))
         if agent_result.get("ok"):
+            public_url = self._start_cloudflare_tunnel(agent_result.get("port"))
+            if public_url:
+                agent_result["public_url"] = public_url
             self._dashboard(agent_result)
             return {"status": "success", "result": agent_result}
 
@@ -379,16 +387,63 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
 
         return {"ok": False}
 
+    def _start_cloudflare_tunnel(self, port):
+        if not port:
+            return None
+        bin_path = shutil.which("cloudflared") or shutil.which("/tmp/cloudflared")
+        if not bin_path:
+            print(f"  \U0001f4e1  Downloading cloudflared for public tunnel...")
+            try:
+                url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+                subprocess.run(f"curl -sL {url} -o /tmp/cloudflared && chmod +x /tmp/cloudflared",
+                               shell=True, capture_output=True, text=True, timeout=30)
+                bin_path = "/tmp/cloudflared"
+                if not os.path.isfile(bin_path):
+                    return None
+            except Exception:
+                return None
+
+        print(f"  \U0001f4e1  Starting public tunnel on port {port}...")
+        try:
+            proc = subprocess.Popen(
+                [bin_path, "tunnel", "--url", f"http://localhost:{port}"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, preexec_fn=os.setsid,
+            )
+            # Read output until we get the URL
+            start = time.time()
+            public_url = None
+            while time.time() - start < 15:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                m = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', line)
+                if m:
+                    public_url = m.group(0)
+                    break
+            if public_url:
+                self.pm.add_process("cloudflared", proc)
+                print(f"    \U0001f310  Public URL: {public_url}")
+                return public_url
+            # Give up but leave it running
+            self.pm.add_process("cloudflared", proc)
+            return None
+        except Exception:
+            return None
+
     def _dashboard(self, result: dict):
         url = result.get("url", "")
         port = result.get("port", "")
         pid = result.get("pid", "")
         logfile = result.get("logfile", "")
+        public_url = result.get("public_url", "")
 
         print(f"\n  \u2705  {self.project_name} is running!")
         print(f"  {'=' * 50}")
+        if public_url:
+            print(f"  \U0001f310  Public: {public_url}")
         if url:
-            print(f"  \U0001f310  URL:  {url}")
+            print(f"  \U0001f310  Local:  {url}")
         if port:
             print(f"  \U0001f5a5  Port: {port}")
         if pid:

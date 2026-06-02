@@ -118,6 +118,17 @@ class ProcessMonitor:
         except (OSError, ProcessLookupError):
             return False
 
+    def add_process(self, name: str, proc: subprocess.Popen) -> int:
+        pid = proc.pid
+        self.processes[pid] = {
+            "proc": proc,
+            "cmd": f"cloudflared_{name}",
+            "logfile": "",
+            "started": time.time(),
+            "timeout": 0,
+        }
+        return pid
+
     def stop(self, pid: int, force: bool = False) -> bool:
         if pid not in self.processes:
             return False
