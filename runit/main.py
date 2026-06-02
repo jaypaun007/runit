@@ -225,7 +225,7 @@ def _choose_run_mode(plan: dict, project_path: str) -> bool:
 
 def cmd_run(target: str, token: str | None = None, max_retries: int | None = None,
             force_docker: bool = False, force_dev: bool = False, yes: bool = False,
-            plain: bool = False):
+            plain: bool = False, instructions: str | None = None):
     cfg = load_config()
     max_retries = max_retries or cfg.get("max_retries", DEFAULT_MAX_RETRIES)
 
@@ -296,7 +296,11 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     print("  \U0001f4ac  Any special instructions for how to run this project?")
     print("    (e.g. 'use python3 instead of python', 'set --port 9000', 'cd backend first')")
     print("    \u23f3  Press Enter to skip")
-    user_instructions = prompt_input("Instructions").strip()
+    if instructions:
+        user_instructions = instructions
+        print(f"  \u2713 Using: {instructions}")
+    else:
+        user_instructions = prompt_input("Instructions").strip()
     if user_instructions:
         plan["_user_instructions"] = user_instructions
         print(f"  \u2713 Noted: {user_instructions}")
@@ -651,6 +655,8 @@ def main():
                         help="Auto-confirm all prompts (for non-interactive environments)")
     parser.add_argument("--plain", action="store_true",
                         help="Disable rich/colored output (auto-enabled in notebooks)")
+    parser.add_argument("--instructions", type=str, default=None,
+                        help="Custom run instructions (e.g. 'use python3.11', for Kaggle/Colab)")
     parser.add_argument("--version", action="store_true", help="Show version")
 
     subcommands = parser.add_argument_group("commands")
@@ -690,7 +696,8 @@ def main():
     if args.target:
         return cmd_run(args.target, token=args.token, max_retries=args.retries,
                        force_docker=args.docker, force_dev=args.dev,
-                       yes=args.yes, plain=args.plain)
+                       yes=args.yes, plain=args.plain,
+                       instructions=args.instructions)
 
     parser.print_help()
     return 1
