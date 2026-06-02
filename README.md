@@ -1,23 +1,54 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://via.placeholder.com/800x200/1a1a2e/00d4ff?text=⚡+Runit">
+    <img src="https://via.placeholder.com/800x200/ffffff/1a1a2e?text=⚡+Runit" alt="Runit Banner" width="100%">
+  </picture>
+</p>
+
 <div align="center">
-  <h1>⚡ Runit</h1>
-  <p><strong>AI-powered agent that makes any GitHub repo runnable — automatically.</strong></p>
-  <p>No manual setup. No dependency hunting. No config files. Just run.</p>
-  <p>
-    <a href="#installation">Installation</a> •
-    <a href="#usage">Usage</a> •
-    <a href="#how-it-works">How It Works</a> •
-    <a href="#bring-your-own-key-byok">BYOK</a> •
-    <a href="#agent-skills">Skills</a> •
-    <a href="#debugger">Debugger</a> •
-    <a href="#how-to-guides">How-To Guides</a> •
-    <a href="#configuration">Configuration</a>
-  </p>
-  <p>
-    <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+">
-    <img src="https://img.shields.io/badge/platform-macOS%20|%20Linux%20|%20Windows-lightgrey.svg" alt="Platforms">
-    <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License">
-  </p>
-</div>
+
+# ⚡ Runit
+
+**AI-powered agent that makes any GitHub repo runnable — automatically.**
+
+No manual setup. No dependency hunting. No config files. **Just run.**
+
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)]()
+[![Platform](https://img.shields.io/badge/platform-macOS%20|%20Linux%20|%20Windows-lightgrey.svg)]()
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![GitHub stars](https://img.shields.io/github/stars/jaypaun007/runit?style=social)]()
+[![GitHub forks](https://img.shields.io/github/forks/jaypaun007/runit?style=social)]()
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
+
+---
+
+### 📋 **Table of Contents**
+
+[Installation](#-installation) •
+[Quick Start](#-quick-start) •
+[Usage](#-usage) •
+[How It Works](#-how-it-works) •
+[Agent Skills](#-agent-skills) •
+[Debugger](#-advanced-debugger) •
+[BYOK](#-bring-your-own-key-byok) •
+[How-To Guides](#-how-to-guides) •
+[Configuration](#-configuration) •
+[Contributing](#-contributing) •
+[License](#-license)
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# One command — that's it
+runit https://github.com/user/repo
+
+# Or run your local project
+runit .
+```
+
+> 🎯 **1 command. 0 config. Any repo. Any language.**
 
 ---
 
@@ -661,6 +692,57 @@ Runit auto-detects Kaggle and Colab environments and optimizes execution.
 
 ---
 
+## 🌟 Show Your Support
+
+If Runit helps you, consider giving it a ⭐ on GitHub!  
+Every star helps more developers discover the project.
+
+---
+
+## 🤝 Contributing
+
+**Contributions are welcome!** Runit is an open-source project and we'd love your help making it better.
+
+### Ways to Contribute
+
+- 🐛 **Report bugs** — Open an [issue](https://github.com/jaypaun007/runit/issues) with details
+- 💡 **Suggest features** — Share your ideas in [discussions](https://github.com/jaypaun007/runit/discussions)
+- 🔧 **Submit PRs** — Fix bugs, add skills, improve the debugger, write tests
+- 📖 **Improve docs** — Better README, more examples, clearer guides
+- 🌍 **Add a skill** — Support a new language/project type
+- 🧪 **Write tests** — Help us reach 100% coverage
+
+### Getting Started
+
+```bash
+# Fork the repo, then:
+git clone https://github.com/your-username/runit.git
+cd runit
+pip install -e ".[dev]"
+python -m pytest tests/
+```
+
+### Code of Conduct
+
+Be respectful, inclusive, and constructive. Runit is a community project — everyone is welcome.
+
+### Project Roadmap
+
+- [x] Core execution engine (Python, Node, Rust, Go, Ruby, Deno, Java)
+- [x] 10 new language skills (C/C++, C#, PHP, Kotlin, Dart, R, Julia, Lua, Scala, Elixir)
+- [x] Advanced debugger with code fix suggestions
+- [x] Docker mode with port auto-detection
+- [x] Web research & error auto-search
+- [x] BYOK (Bring Your Own Key) — any AI provider
+- [ ] GitHub Actions CI/CD pipeline
+- [ ] PyPI package publish
+- [ ] VS Code extension
+- [ ] Web UI dashboard
+- [ ] Windows native installer
+- [ ] 100% test coverage
+
+---
+
 ## ⚠️ Disclaimer
 
 Runit is provided for **educational and research purposes only**. By using this tool, you acknowledge and agree that:
@@ -680,9 +762,31 @@ MIT
 ---
 
 <div align="center">
-  <p>Made with ❤️ by <strong>Jay Paun</strong></p>
+  <p>Made with ❤️ by <strong><a href="https://github.com/jaypaun007">Jay Paun</a></strong></p>
   <p>
-    <a href="https://github.com/jaypaun007/runit/issues">Report Bug</a> •
-    <a href="https://github.com/jaypaun007/runit/discussions">Feature Request</a>
+    <a href="https://github.com/jaypaun007/runit">🏠 Home</a> •
+    <a href="https://github.com/jaypaun007/runit/issues">🐛 Report Bug</a> •
+    <a href="https://github.com/jaypaun007/runit/discussions">💡 Feature Request</a> •
+    <a href="https://github.com/jaypaun007/runit/pulls">🔧 Submit PR</a> •
+    <a href="https://github.com/jaypaun007/runit/stargazers">⭐ Star</a>
+  </p>
+  <p>
+    <sub>Built with Python • Powered by AI • Driven by community</sub>
+  </p>
+  <p>
+    <a href="https://star-history.com/#jaypaun007/runit&Date">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jaypaun007/runit&type=Date&theme=dark" />
+        <img src="https://api.star-history.com/svg?repos=jaypaun007/runit&type=Date" alt="Star History Chart" width="600" />
+      </picture>
+    </a>
+  </p>
+  <br>
+  <p>
+    <strong>If you find this project useful, please ⭐ star it on GitHub!</strong>
+  </p>
+  <br>
+  <p>
+    <sub>Runit is provided for educational purposes. Use responsibly.</sub>
   </p>
 </div>
