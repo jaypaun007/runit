@@ -123,7 +123,7 @@ class Pipeline:
         self._detect_services_from_env()
 
     def _detect_services_from_env(self):
-        env_path = self.project_path / ".env.example"
+        env_path = Path(self.project_path) / ".env.example"
         if not env_path.exists():
             return
         for line in env_path.read_text().splitlines():
