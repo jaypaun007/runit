@@ -1,6 +1,9 @@
 import sys
 import os
 
+AUTO_YES = False
+FORCE_PLAIN = False
+
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -20,7 +23,7 @@ except ImportError:
 
 
 def _console():
-    if HAS_RICH:
+    if HAS_RICH and not FORCE_PLAIN:
         return Console()
     return None
 
@@ -229,6 +232,8 @@ def print_skill(skill: dict | None):
 
 
 def confirm(msg: str, default: bool = True) -> bool:
+    if AUTO_YES:
+        return True
     if HAS_RICH:
         return RichConfirm.ask(f"[bold]{msg}[/]", default=default)
     suffix = " [Y/n]" if default else " [y/N]"

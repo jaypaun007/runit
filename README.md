@@ -134,7 +134,7 @@ pip install git+https://github.com/jaypaun007/runit.git
 
 ```python
 !pip install git+https://github.com/jaypaun007/runit.git
-!runit https://github.com/jaypaun007/demo-project
+!runit https://github.com/jaypaun007/repo --yes --plain
 ```
 
 ---
@@ -181,6 +181,8 @@ runit --key-delete MY_API_KEY
 | `--token, -t` | GitHub personal access token |
 | `--docker` | Force Docker mode |
 | `--dev` | Force development mode |
+| `--yes, -y` | Auto-confirm all prompts (for Colab/Kaggle) |
+| `--plain` | Disable colored output (auto-enabled in notebooks) |
 | `--version` | Show version |
 
 ---
@@ -379,8 +381,8 @@ runit .
 
 ```bash
 runit https://github.com/jaypaun007/repo
-echo y | runit https://github.com/jaypaun007/repo
 runit https://github.com/jaypaun007/repo --retries 5
+runit https://github.com/jaypaun007/repo --yes --plain
 ```
 
 ### Provide custom instructions

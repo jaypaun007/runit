@@ -163,9 +163,16 @@ def _choose_run_mode(plan: dict, project_path: str) -> bool:
 
 
 def cmd_run(target: str, token: str | None = None, max_retries: int | None = None,
-            force_docker: bool = False, force_dev: bool = False):
+            force_docker: bool = False, force_dev: bool = False, yes: bool = False,
+            plain: bool = False):
     cfg = load_config()
     max_retries = max_retries or cfg.get("max_retries", DEFAULT_MAX_RETRIES)
+
+    import runit.cli as cli_mod
+    if yes:
+        cli_mod.AUTO_YES = True
+    if plain:
+        cli_mod.FORCE_PLAIN = True
 
     no_api_key = not cfg.get("api_key")
     if no_api_key:
@@ -187,6 +194,8 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     env_type = detect_env()
     print_env_banner(env_type)
     is_remote = env_type in ("kaggle", "colab")
+    if not plain and not cli_mod.FORCE_PLAIN and is_remote:
+        cli_mod.FORCE_PLAIN = True
     if is_remote:
         print("  \U0001f30d  Detected cloud environment — optimizing execution strategy")
 
@@ -553,6 +562,10 @@ def main():
                         help="Use Docker mode (skip prompt)")
     parser.add_argument("--dev", action="store_true",
                         help="Use development mode (skip prompt)")
+    parser.add_argument("--yes", "-y", action="store_true",
+                        help="Auto-confirm all prompts (for non-interactive environments)")
+    parser.add_argument("--plain", action="store_true",
+                        help="Disable rich/colored output (auto-enabled in notebooks)")
     parser.add_argument("--version", action="store_true", help="Show version")
 
     subcommands = parser.add_argument_group("commands")
@@ -591,7 +604,8 @@ def main():
 
     if args.target:
         return cmd_run(args.target, token=args.token, max_retries=args.retries,
-                       force_docker=args.docker, force_dev=args.dev)
+                       force_docker=args.docker, force_dev=args.dev,
+                       yes=args.yes, plain=args.plain)
 
     parser.print_help()
     return 1
