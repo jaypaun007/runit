@@ -230,7 +230,7 @@ def agent_analyze_project(project_path: str, plan: dict | None = None) -> dict:
 
     for i, step_task in enumerate(steps, 1):
         if c:
-            cprint(f"  [cyan]Agent analyzing: {step_task}[/]")
+            c.print(f"  [cyan]Agent analyzing: {step_task}[/]")
         result = agent_run(
             step_task,
             project_path,

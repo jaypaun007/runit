@@ -248,10 +248,17 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     print_banner()
 
     if is_github_url(target):
-        print("")
-        print("  \u26a0\ufe0f  [bold yellow]Disclaimer:[/] This tool runs code from third-party repositories.")
-        print("  \u26a0\ufe0f  [yellow]Only proceed if you trust the source. Use isolated environments for untrusted code.[/]")
-        print("  \u26a0\ufe0f  [yellow]You assume all risk. See README for full disclaimer.[/]")
+        c = cli_mod._console()
+        if c:
+            c.print("")
+            c.print("  \u26a0\ufe0f  [bold yellow]Disclaimer:[/] This tool runs code from third-party repositories.")
+            c.print("  \u26a0\ufe0f  [yellow]Only proceed if you trust the source. Use isolated environments for untrusted code.[/]")
+            c.print("  \u26a0\ufe0f  [yellow]You assume all risk. See README for full disclaimer.[/]")
+        else:
+            print("")
+            print("  \u26a0\ufe0f  Disclaimer: This tool runs code from third-party repositories.")
+            print("  \u26a0\ufe0f  Only proceed if you trust the source. Use isolated environments for untrusted code.")
+            print("  \u26a0\ufe0f  You assume all risk. See README for full disclaimer.")
         from runit.cli import confirm
         if not confirm("Continue?", default=False):
             print("  \u274c Aborted by user.")
@@ -265,13 +272,13 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     if is_remote:
         print("  \U0001f30d  Detected cloud environment — optimizing execution strategy")
 
-    print_step(1, 6, "Loading project...")
+    print_step(1, 8, "Loading project...")
     repo_url = target if is_github_url(target) else None
     project_path = load_project(target, token)
     project_name = get_project_name(project_path)
     print(f"  \U0001f4c1 Loaded: {project_name} ({project_path})")
 
-    print_step(2, 6, "Analyzing project structure...")
+    print_step(2, 8, "Analyzing project structure...")
     plan = analyze_project(project_path, repo_url=repo_url)
     if not no_api_key:
         agent_insights = agent_analyze_project(project_path, plan)
@@ -279,7 +286,7 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
             plan["_agent_insights"] = agent_insights
     print_plan(plan)
 
-    print_step(3, 6, "Detecting required services...")
+    print_step(3, 8, "Detecting required services...")
     service_results = start_required_services(project_path, plan)
     plan["_services_started"] = service_results
 
