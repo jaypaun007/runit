@@ -9,11 +9,24 @@ from runit.config import load_config
 
 def is_github_url(path: str) -> bool:
     parsed = urlparse(path)
-    return "github.com" in parsed.netloc and not path.endswith(".git")
+    return "github.com" in parsed.netloc
 
 
-def clone_repo(url: str, token: str | None = None) -> str:
-    dest = tempfile.mkdtemp(prefix="runit_")
+def clone_repo(url: str, token: str | None = None, dest_dir: str | None = None) -> str:
+    repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
+    dest = os.path.abspath(os.path.join(dest_dir or os.getcwd(), repo_name))
+
+    if os.path.isdir(dest) and os.path.isdir(os.path.join(dest, ".git")):
+        print(f"  \U0001f504 Updating existing repo: {dest}")
+        try:
+            subprocess.check_call(
+                ["git", "-C", dest, "pull", "--ff-only"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return dest
+        except subprocess.CalledProcessError:
+            print(f"  \u26a0\ufe0f  Could not update, using existing: {dest}")
+            return dest
 
     if token:
         parsed = urlparse(url)
@@ -25,13 +38,13 @@ def clone_repo(url: str, token: str | None = None) -> str:
     try:
         subprocess.check_call(
             ["git", "clone", "--depth", "1", authed_url, dest],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         if not token:
             raise PermissionError(
                 "Repository requires authentication. Provide a GitHub token with --token or set GITHUB_TOKEN env var."
-            )
+            ) from e
         raise
     return dest
 
@@ -94,5 +107,4 @@ def get_project_name(project_path: str) -> str:
 
 
 def cleanup(path: str):
-    if path and "/tmp/runit" in path:
-        shutil.rmtree(path, ignore_errors=True)
+    pass
