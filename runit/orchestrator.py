@@ -2,8 +2,12 @@ import os
 import json
 import re
 import time
+import socket
 import shutil
+import urllib.parse
 import subprocess
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from runit.cli import _console, print_step, confirm, AUTO_YES
@@ -17,6 +21,7 @@ from runit.process_monitor import ProcessMonitor
 from runit.error_classifier import classify_error, get_auto_heal
 from runit.config import load_config
 from runit.skills import match_skills, detect_package_manager, get_skill, FRAMEWORK_ALIASES
+from runit.environment import is_notebook_env
 from runit.llm import llm_call
 from runit.executor import ensure_runtime
 
@@ -168,21 +173,35 @@ class Pipeline:
 
         print(f"  \U0001f511  Resolving {len(env_example)} env vars...")
         self.env_vars = {}
+
+        pending_critical = []
         for var in env_example:
             val = self.er.resolve(var, env_example)
             if val is None:
-                if is_critical(var) and not self.auto_yes:
-                    try:
-                        val = input(f"    \U0001f511  Enter {var}: ")
-                        if val.strip():
-                            self.er.categories[var] = "user_provided"
-                    except (EOFError, KeyboardInterrupt):
-                        pass
+                if is_critical(var):
+                    if not self.auto_yes:
+                        pending_critical.append(var)
                 if not val:
                     from runit.env_resolver import random_string
                     val = random_string(16)
                     self.er.categories[var] = "auto_generated"
             self.env_vars[var] = val or ""
+
+        if pending_critical and is_notebook_env():
+            print(f"    \U0001f4e1  Opening web UI for {len(pending_critical)} env vars...")
+            submitted = self._env_ui_server(pending_critical)
+            for var, val in submitted.items():
+                self.env_vars[var] = val
+                self.er.categories[var] = "user_provided"
+        else:
+            for var in pending_critical:
+                try:
+                    val = input(f"    \U0001f511  Enter {var}: ")
+                    if val.strip():
+                        self.env_vars[var] = val.strip()
+                        self.er.categories[var] = "user_provided"
+                except (EOFError, KeyboardInterrupt):
+                    pass
 
         written = self.er.generate_env_file(self.env_vars)
         print(f"    \u2705  Written {written} ({len(self.env_vars)} vars)")
@@ -386,6 +405,118 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
             return r
 
         return {"ok": False}
+
+    def _find_free_port(self, start=8000):
+        for port in range(start, start + 100):
+            try:
+                with socket.socket() as s:
+                    s.bind(("", port))
+                    return port
+            except OSError:
+                continue
+        return start
+
+    def _env_ui_form_html(self, var_names):
+        rows = []
+        for v in var_names:
+            current = self.env_vars.get(v, "")
+            val_attr = f' value="{current}"' if current else ""
+            rows.append(f"""
+        <div class="field">
+          <label for="{v}">{v}</label>
+          <input id="{v}" name="{v}" type="text"{val_attr}>
+        </div>""")
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runit - Set Environment Variables</title>
+<style>
+  * {{ box-sizing:border-box; margin:0; padding:0 }}
+  body {{ font:16px/1.5 system-ui,sans-serif; background:#0f172a; color:#e2e8f0; min-height:100vh; display:flex; align-items:center; justify-content:center }}
+  .card {{ background:#1e293b; padding:2rem; border-radius:12px; width:90%; max-width:520px }}
+  h1 {{ font-size:1.3rem; margin-bottom:.25rem }}
+  p {{ color:#94a3b8; margin-bottom:1.5rem; font-size:.9rem }}
+  .field {{ margin-bottom:1rem }}
+  label {{ display:block; font-size:.8rem; font-weight:600; color:#94a3b8; margin-bottom:.3rem; word-break:break-all }}
+  input {{ width:100%; padding:.6rem .8rem; background:#0f172a; border:1px solid #334155; border-radius:8px; color:#e2e8f0; font-size:.9rem; outline:none; transition:border-color .15s }}
+  input:focus {{ border-color:#6366f1 }}
+  button {{ width:100%; padding:.7rem; background:#6366f1; border:none; border-radius:8px; color:#fff; font-size:.95rem; font-weight:600; cursor:pointer; margin-top:.5rem }}
+  button:hover {{ background:#4f46e5 }}
+  .small {{ font-size:.75rem; color:#64748b; text-align:center; margin-top:1rem }}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>⚡ Runit — Environment Variables</h1>
+  <p>Review and fill the <strong>{len(var_names)}</strong> required variables, then click Save.</p>
+  <form method="POST" action="/">{"".join(rows)}
+    <button type="submit">Save &amp; Continue</button>
+  </form>
+  <div class="small">Values already have random defaults — edit or leave as-is.</div>
+</div>
+</body>
+</html>"""
+
+    def _env_ui_server(self, var_names):
+        result_file = Path(self.project_path) / ".runit" / "env_ui_result.json"
+        result_file.parent.mkdir(parents=True, exist_ok=True)
+        if result_file.exists():
+            result_file.unlink()
+
+        form_html = self._env_ui_form_html(var_names)
+        submitted = {}
+
+        class EnvUIHandler(BaseHTTPRequestHandler):
+            def do_GET(self_):
+                if self_.path == "/favicon.ico":
+                    self_.send_response(204)
+                    self_.end_headers()
+                    return
+                self_.send_response(200)
+                self_.send_header("Content-Type", "text/html; charset=utf-8")
+                self_.end_headers()
+                self_.wfile.write(form_html.encode())
+
+            def do_POST(self_):
+                length = int(self_.headers.get("Content-Length", 0))
+                body = self_.rfile.read(length).decode()
+                parsed = urllib.parse.parse_qs(body)
+                for var in var_names:
+                    vals = parsed.get(var, [])
+                    if vals and vals[0].strip():
+                        submitted[var] = vals[0].strip()
+                result_file.write_text(json.dumps(submitted))
+                self_.send_response(200)
+                self_.send_header("Content-Type", "text/html; charset=utf-8")
+                self_.end_headers()
+                self_.wfile.write(b"<h2>Saved!</h2><script>window.close()</script>")
+
+            def log_message(self_, *a):
+                pass
+
+        port = self._find_free_port(8000)
+        server = HTTPServer(("0.0.0.0", port), EnvUIHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        public_url = self._start_cloudflare_tunnel(port)
+        if public_url:
+            print(f"    \U0001f310  Open: {public_url}")
+            print(f"    \u23f3  Waiting for submission (timeout: 120s)...")
+        else:
+            print(f"    \U0001f5a5  Local: http://localhost:{port}")
+
+        for _ in range(120):
+            if result_file.exists():
+                try:
+                    submitted = json.loads(result_file.read_text())
+                    break
+                except Exception:
+                    pass
+            time.sleep(1)
+
+        server.shutdown()
+        return submitted
 
     def _start_cloudflare_tunnel(self, port):
         if not port:
