@@ -279,6 +279,22 @@ class Pipeline:
 
         if self.project_type == "node":
             pm = self.package_manager
+            if not shutil.which(pm):
+                print(f"    \u26a0\ufe0f  {pm} not found, installing...")
+                if pm == "pnpm":
+                    subprocess.run("npm install -g pnpm 2>/dev/null || npm i -g pnpm@latest",
+                                   shell=True, capture_output=True, text=True, timeout=60)
+                    if not shutil.which("pnpm"):
+                        print(f"    \u26a0\ufe0f  Falling back to npm")
+                        pm = "npm"
+                        self.package_manager = "npm"
+                elif pm == "yarn":
+                    subprocess.run("npm install -g yarn 2>/dev/null",
+                                   shell=True, capture_output=True, text=True, timeout=60)
+                    if not shutil.which("yarn"):
+                        print(f"    \u26a0\ufe0f  Falling back to npm")
+                        pm = "npm"
+                        self.package_manager = "npm"
             lock_files = {"pnpm": "pnpm-lock.yaml", "yarn": "yarn.lock", "npm": "package-lock.json"}
             lock = lock_files.get(pm, "package-lock.json")
             if (root / lock).exists() or (root / "package.json").exists():
