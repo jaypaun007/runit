@@ -64,7 +64,7 @@ class Pipeline:
         self._resolve_env()
 
         cfg = load_config()
-        if self.auto_yes and cfg.get("api_key"):
+        if self.auto_yes and not is_notebook_env() and cfg.get("api_key"):
             self._ai_generate_env()
 
         print_step(4, 5, "Installing dependencies...")
@@ -193,9 +193,8 @@ class Pipeline:
         for var in env_example:
             val = self.er.resolve(var, env_example)
             if val is None:
-                if is_critical(var):
-                    if not self.auto_yes:
-                        pending_critical.append(var)
+                if is_critical(var) and (not self.auto_yes or is_notebook_env()):
+                    pending_critical.append(var)
                 if not val:
                     from runit.env_resolver import random_string
                     val = random_string(16)
@@ -558,8 +557,10 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
                 except Exception:
                     pass
             poll += 1
-            if poll % 60 == 0:
-                print(f"    \u23f3  Still waiting... ({poll}s)")
+            if poll == 60:
+                print(f"    \u23f3  Still waiting... (or click 'Skip' on the form to use defaults)")
+            elif poll % 300 == 0:
+                print(f"    \u23f3  Still waiting... ({poll // 60}min)")
             time.sleep(1)
 
         server.shutdown()
