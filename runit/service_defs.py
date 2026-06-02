@@ -7,21 +7,21 @@ SERVICE_DEFS = {
         "start_cmd": "pg_ctlcluster {version} main start 2>/dev/null || service postgresql start",
         "stop_cmd": "pg_ctlcluster {version} main stop 2>/dev/null || service postgresql stop",
         "configure_cmds": [
-            'V=$(pg_lsclusters 2>/dev/null | grep -v "^Ver" | head -1 | awk \'{print $1}\'); '
-            'if [ -n "$V" ]; then '
-            'HBA="/etc/postgresql/$V/main/pg_hba.conf"; '
-            'echo "local all all trust" > "$HBA"; '
-            'echo "host all all 127.0.0.1/32 trust" >> "$HBA"; '
-            'echo "host all all ::1/128 trust" >> "$HBA"; '
-            'pg_ctlcluster $V main reload 2>/dev/null; '
-            'fi; '
+            'for f in /etc/postgresql/*/main/pg_hba.conf; do '
+            '[ -f "$f" ] && echo "local all all trust" > "$f" && '
+            'echo "host all all 127.0.0.1/32 trust" >> "$f" && '
+            'echo "host all all ::1/128 trust" >> "$f"; '
+            'done; '
+            '(pg_ctlcluster 16 main reload 2>/dev/null) || '
+            '(pg_ctlcluster 15 main reload 2>/dev/null) || '
+            '(pg_ctlcluster 14 main reload 2>/dev/null) || '
+            '(service postgresql restart 2>/dev/null) || true; '
             'sleep 1; '
-            'PGPASSWORD=app psql -h localhost -U postgres -c "CREATE USER app WITH PASSWORD \'app\'" 2>/dev/null || true; '
-            'PGPASSWORD=app psql -h localhost -U postgres -c "CREATE DATABASE app OWNER app" 2>/dev/null || true; '
-            'PGPASSWORD=app psql -h localhost -U app -d app -c "SELECT 1" 2>/dev/null && echo "PG_OK" || echo "PG_WARN"',
+            'psql -h localhost -U postgres -c "CREATE USER app WITH PASSWORD \'app\'" 2>/dev/null || true; '
+            'psql -h localhost -U postgres -c "CREATE DATABASE app OWNER app" 2>/dev/null || true; '
+            'psql -h localhost -U app -d app -c "SELECT 1" 2>/dev/null && echo "PG_OK" || echo "PG_WARN"',
         ],
-        "binary_url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/16.4.0/embedded-postgres-binaries-linux-amd64-16.4.0.jar",
-        "health_cmd": ["psql", "-h", "localhost", "-U", "app", "-d", "app", "-c", "SELECT 1"],
+        "health_cmd": ["sh", "-c", "PGPASSWORD=app psql -h localhost -U app -d app -c 'SELECT 1' 2>/dev/null"],
         "port": 5432,
         "connection_url": "postgresql://app:app@{host}:{port}/app",
         "env_vars": ["DATABASE_URL", "POSTGRES_URL", "PGHOST", "PGPORT"],
