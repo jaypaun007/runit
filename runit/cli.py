@@ -257,6 +257,8 @@ def _is_tty() -> bool:
 
 
 def prompt_input(msg: str, secret: bool = False, default: str = "") -> str:
+    if AUTO_YES:
+        return default
     if HAS_RICH and _is_tty():
         from rich.prompt import Prompt
         if secret:

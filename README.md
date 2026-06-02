@@ -133,8 +133,8 @@ pip install git+https://github.com/jaypaun007/runit.git
 ### Kaggle / Google Colab
 
 ```python
-!pip install git+https://github.com/jaypaun007/runit.git
-!runit https://github.com/jaypaun007/repo --yes --plain
+!pip install --force-reinstall --no-cache-dir git+https://github.com/jaypaun007/runit.git
+!runit https://github.com/jaypaun007/repo --yes --plain --dev
 ```
 
 ---
