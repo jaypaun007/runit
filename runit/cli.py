@@ -25,6 +25,8 @@ except ImportError:
 def _console():
     if HAS_RICH and not FORCE_PLAIN:
         return Console()
+    if HAS_RICH:
+        return Console(force_terminal=False, no_color=True)
     return None
 
 

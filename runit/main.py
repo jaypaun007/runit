@@ -176,8 +176,13 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
 
     no_api_key = not cfg.get("api_key")
     if no_api_key:
-        print("  \u26a0\ufe0f  No AI API key configured. Running in limited fallback mode.")
-        print("  Run [cyan]runit --setup[/] to configure your AI provider for smarter analysis.\n")
+        c = cli_mod._console()
+        if c:
+            c.print("  \u26a0\ufe0f  No AI API key configured. Running in limited fallback mode.")
+            c.print("  Run [cyan]runit --setup[/] to configure your AI provider for smarter analysis.\n")
+        else:
+            print("  \u26a0\ufe0f  No AI API key configured. Running in limited fallback mode.")
+            print("  Run runit --setup to configure your AI provider for smarter analysis.\n")
 
     print_banner()
 
