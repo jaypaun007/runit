@@ -5,7 +5,7 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="runit",
-    version="1.1.0",
+    version="1.2.0",
     description="AI-powered execution agent — makes any GitHub repo runnable automatically",
     long_description=long_description,
     long_description_content_type="text/markdown",

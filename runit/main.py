@@ -1,6 +1,8 @@
 import sys
 import os
 import json
+import re
+from pathlib import Path
 
 from runit.config import load_config, save_config, DEFAULT_MAX_RETRIES, save_key, get_key, list_keys, delete_key
 from runit.byok import setup_byok_interactive
@@ -12,26 +14,78 @@ from runit.cli import (
 )
 from runit.project_loader import load_project, get_project_name, cleanup, is_github_url
 from runit.analyzer import analyze_project
-from runit.skills import get_skill, SKILLS_REGISTRY, detect_package_manager, has_pnpm, get_build_instructions
+from runit.skills import get_skill, SKILLS_REGISTRY, detect_package_manager, has_pnpm, get_build_instructions, get_runtime_install_cmd
 from runit.deps import install
-from runit.executor import execute
+from runit.executor import execute, ensure_runtime
 from runit.error_handler import fix_error, apply_fix, research_error_online
 from runit.debugger import deep_debug, print_debug_report, apply_code_patch
 from runit.notify import notify_done
 from runit.environment import detect_env, env_info, has_docker, is_notebook_env
 from runit.web_tools import web_search, fetch_github_readme
+from runit.agent import agent_run, agent_analyze_project
+from runit.services import start_required_services, detect_required_services, get_service_urls
+from runit.cli import AUTO_YES as CLI_AUTO_YES
 
 
-def _prompt_for_missing_env(plan: dict, project_name: str) -> dict:
-    """Ask user for missing environment variables and return them as a dict."""
+_CRITICAL_ENV_PATTERNS = [
+    "api_key", "secret", "password", "token", "auth",
+    "database_url", "postgres", "redis", "mongodb",
+    "openai", "anthropic", "aws_access", "aws_secret",
+    "jwt_secret", "encryption_key", "cookie_secret",
+    "slack_token", "discord_token", "github_token",
+    "host", "port", "node_env",
+]
+
+
+def _is_critical_env(var: str) -> bool:
+    lower = var.lower()
+    for pattern in _CRITICAL_ENV_PATTERNS:
+        if pattern in lower:
+            return True
+    return len(lower) < 30 or "key" in lower or "secret" in lower or "token" in lower or "url" in lower
+
+
+def _categorize_env_vars(plan: dict, project_path: str) -> tuple[list[str], list[str]]:
+    required = plan.get("required_env", [])
+    critical = []
+    non_critical = []
+    root_env = Path(project_path) / ".env.example"
+    used_in_code = set()
+
+    if root_env.exists():
+        try:
+            for line in root_env.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    name = line.split("=", 1)[0].strip()
+                    used_in_code.add(name)
+        except Exception:
+            pass
+
+    for var in required:
+        if var in used_in_code or _is_critical_env(var):
+            critical.append(var)
+        else:
+            non_critical.append(var)
+
+    if not critical:
+        critical = required[:min(5, len(required))]
+        non_critical = required[min(5, len(required)):]
+
+    return critical, non_critical
+
+
+def _prompt_for_missing_env(plan: dict, project_name: str, project_path: str = "") -> dict:
     required = plan.get("required_env", [])
     if not required:
         return {}
 
+    critical, non_critical = _categorize_env_vars(plan, project_path)
+
     already_have = set(os.environ.keys())
     env_vars = {}
 
-    for var in required:
+    for var in critical:
         if var in already_have:
             continue
         stored = get_key(var)
@@ -46,6 +100,13 @@ def _prompt_for_missing_env(plan: dict, project_name: str) -> dict:
             if confirm(f"Save {var} for future use?", default=True):
                 save_key(var, val)
             print(f"  \u2713 {var} set")
+
+    if non_critical and not CLI_AUTO_YES and env_vars:
+        c = _console()
+        if c:
+            c.print(f"  [dim]Skipped {len(non_critical)} non-critical env vars ({', '.join(non_critical[:3])}...)[/]")
+        else:
+            print(f"  (skipped {len(non_critical)} non-critical env vars)")
 
     return env_vars
 
@@ -212,18 +273,26 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
 
     print_step(2, 6, "Analyzing project structure...")
     plan = analyze_project(project_path, repo_url=repo_url)
+    if not no_api_key:
+        agent_insights = agent_analyze_project(project_path, plan)
+        if agent_insights:
+            plan["_agent_insights"] = agent_insights
     print_plan(plan)
+
+    print_step(3, 6, "Detecting required services...")
+    service_results = start_required_services(project_path, plan)
+    plan["_services_started"] = service_results
 
     skill = get_skill(plan.get("type", ""))
     if skill:
-        print_step(2, 6, f"Agent skill loaded: {skill['name']}", "done")
+        print_step(4, 8, f"Agent skill loaded: {skill['name']}", "done")
         print_skill(skill)
         build_steps = get_build_instructions(plan.get("type", ""))
         if build_steps:
             print(f"  \U0001f527  Typical setup: {'  |  '.join(build_steps)}")
 
     # Ask user for custom run instructions
-    print_step(2, 6, "Optional: Add custom instructions", "running")
+    print_step(4, 8, "Optional: Add custom instructions", "running")
     print("  \U0001f4ac  Any special instructions for how to run this project?")
     print("    (e.g. 'use python3 instead of python', 'set --port 9000', 'cd backend first')")
     print("    \u23f3  Press Enter to skip")
@@ -232,16 +301,17 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
         plan["_user_instructions"] = user_instructions
         print(f"  \u2713 Noted: {user_instructions}")
 
-    # Prompt user for any required keys upfront
+    # Prompt user for any required keys upfront (smart: only critical ones)
     required_env = plan.get("required_env", [])
     if required_env:
         missing = [v for v in required_env if v not in os.environ and not get_key(v)]
         if missing:
-            print(f"\n  \U0001f511  This project requires {len(missing)} environment variable(s)")
-            for var in missing:
+            critical_missing = [v for v in missing if _is_critical_env(v)]
+            print(f"\n  \U0001f511  Project needs environment variables ({len(critical_missing)} critical of {len(missing)} total)")
+            for var in critical_missing[:8]:
                 print(f"    \U0001f511  {var}")
-            if confirm("Set these now?", default=True):
-                env_overrides = _prompt_for_missing_env(plan, project_name)
+            if confirm("Set critical ones now?", default=True):
+                env_overrides = _prompt_for_missing_env(plan, project_name, project_path)
                 plan["_env_overrides"] = env_overrides
             else:
                 print("  \u2716 Will prompt when needed during execution")
@@ -271,18 +341,18 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
         print(f"  \U0001f4bb  Dev mode: {pm} run {script}")
 
     if not mode_chosen and (docker_available or has_dev_scripts):
-        print_step(3, 6, "Choosing run mode...")
+        print_step(5, 8, "Choosing run mode...")
         mode_chosen = _choose_run_mode(plan, project_path)
 
     if not mode_chosen:
         step_label = "Installing dependencies..."
-        step_num = 3
+        step_num = 6
     else:
         step_label = "Preparing runtime..."
-        step_num = 3
+        step_num = 6
 
     if plan.get("_run_mode") != "docker":
-        print_step(step_num, 6, step_label)
+        print_step(step_num, 8, step_label)
         install(plan, project_path)
         print(f"  \u2705 Dependencies ready")
 
@@ -299,7 +369,7 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
         attempt += 1
         label = f"Running project (attempt {attempt})"
         if attempt <= max_retries:
-            print_step(4, 6, label)
+            print_step(7, 8, label)
         else:
             print(f"  \U0001f504  Attempt {attempt} (persistent mode)...")
 
@@ -325,8 +395,18 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
         last_error = result.stderr or result.stdout
         print(f"  \u274c Attempt {attempt} failed")
 
-        print_step(5, 6, "Analyzing error...")
-        # Run deep debugger for advanced analysis
+        print_step(8, 8, "Analyzing and fixing error...")
+
+        if not no_api_key:
+            agent_result = agent_run(
+                f"Fix this error and get the project running. Error: {last_error[:1000]}",
+                project_path,
+                max_steps=8,
+            )
+            if agent_result.get("status") == "success":
+                manual_steps.append(agent_result.get("result", ""))
+                continue
+
         debug_result = deep_debug(last_error, plan, project_path)
         print_debug_report(debug_result)
 

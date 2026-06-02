@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def _run(cmd: list[str], cwd: str, env: dict | None = None,
-         timeout: int = 120, capture: bool = True) -> subprocess.CompletedProcess:
+         timeout: int = 180, capture: bool = True) -> subprocess.CompletedProcess:
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
@@ -286,6 +286,29 @@ def run_elixir(entry: str, project_path: str, env: dict | None = None) -> subpro
     )
 
 
+def ensure_runtime(project_type: str) -> bool:
+    from runit.skills import SKILLS_REGISTRY
+    skill = SKILLS_REGISTRY.get(project_type)
+    if not skill:
+        return True
+    checks = skill.get("runtime_check", [])
+    for check in checks:
+        if shutil.which(check):
+            return True
+    install_cmds = skill.get("runtime_install", [])
+    if not install_cmds:
+        return False
+    for cmd in install_cmds:
+        try:
+            subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+        except Exception:
+            pass
+    for check in checks:
+        if shutil.which(check):
+            return True
+    return False
+
+
 RUNNERS = {
     "python": run_python,
     "node": run_node,
@@ -326,6 +349,12 @@ def execute(plan: dict, project_path: str, env: dict | None = None) -> subproces
     ptype = plan.get("type", "python")
     entry = plan.get("entry", "")
     fallbacks = plan.get("fallbacks", [])
+
+    if not ensure_runtime(ptype):
+        return subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="",
+            stderr=f"[ERROR] Runtime for {ptype} not available and could not be installed."
+        )
 
     runner = RUNNERS.get(ptype)
     if not runner:
