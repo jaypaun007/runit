@@ -22,8 +22,15 @@ You have these tools available:
 5. edit_file(path, old_string, new_string) - Modify a file
 6. write_file(path, content) - Write a new file
 7. set_env(name, value) - Set an environment variable
-8. install_package(name) - Install a system package via apt
+8. install_package(name) - Install a system package via apt/pip (handles 'postgresql', 'redis', 'mysql', 'mongodb', 'rabbitmq', 'nginx', etc.)
 9. write_env_file(entries) - Write a .env file with key=value pairs (entries is a list of {key, val})
+10. ask_user(question, secret) - Ask the user for input (secret=true masks input for API keys/passwords)
+
+When you need something from the user, use ask_user instead of giving up.
+Examples:
+- Need an API key: ask_user("Enter GROQ_API_KEY for the LLM provider")
+- Need a choice: ask_user("Which port should I use? [8000]")
+- Need clarification: ask_user("Should I install PostgreSQL via Docker or apt-get?")
 
 When given complex natural language instructions like:
 - "use python3 instead of python" -> set _user_instructions
@@ -37,7 +44,12 @@ Always respond in this JSON format:
 When complete:
 {"thought": "summary", "action": "done", "result": "...", "done": true}
 
-Be concise. Execute one step at a time. For complex instructions, break into multiple steps."""
+Be concise. Execute one step at a time. For complex instructions, break into multiple steps.
+IMPORTANT rules:
+- NEVER say "I cannot" or "I'm unable" — use ask_user to get what you need
+- If a tool fails, try a different approach before giving up
+- For service installation (PostgreSQL, Redis, MySQL), try apt-get install first, then pip install as fallback
+- Read the project files before making assumptions about what's needed"""
 
 
 def _safe_read(path: str) -> str:
@@ -71,7 +83,7 @@ def _run_cmd(command: str, cwd: str | None = None) -> str:
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,
-            timeout=180, cwd=cwd
+            timeout=300, cwd=cwd
         )
         output = result.stdout or ""
         if result.stderr:
@@ -80,7 +92,7 @@ def _run_cmd(command: str, cwd: str | None = None) -> str:
             output += f"\n(exit code: {result.returncode})"
         return output[-3000:] if len(output) > 3000 else output
     except subprocess.TimeoutExpired:
-        return "Command timed out (180s)"
+        return "Command timed out (300s)"
     except Exception as e:
         return f"Error running command: {e}"
 
@@ -129,9 +141,25 @@ def _set_env(name: str, value: str) -> str:
 
 
 def _install_package(name: str) -> str:
+    apt_map = {
+        "postgresql": "postgresql postgresql-client",
+        "postgres": "postgresql postgresql-client",
+        "redis": "redis-server",
+        "mysql": "mysql-server",
+        "mongodb": "mongodb-mongosh",
+        "mongo": "mongodb-mongosh",
+        "rabbitmq": "rabbitmq-server",
+        "elasticsearch": "elasticsearch",
+        "mariadb": "mariadb-server",
+        "cassandra": "cassandra",
+        "nginx": "nginx",
+        "clickhouse": "clickhouse-server",
+        "neo4j": "neo4j",
+    }
+    apt_pkg = apt_map.get(name.lower(), name)
     try:
         result = subprocess.run(
-            f"apt-get install -y {name} 2>/dev/null || pip install {name} 2>/dev/null",
+            f"apt-get install -y {apt_pkg} 2>/dev/null || pip install {name} 2>/dev/null",
             shell=True, capture_output=True, text=True, timeout=120
         )
         if result.returncode == 0:
@@ -141,41 +169,20 @@ def _install_package(name: str) -> str:
         return f"Error installing {name}: {e}"
 
 
-def _write_env_file(entries: list[dict]) -> str:
+def _write_env_file(entries: list[dict], project_path: str = "") -> str:
     try:
+        target = Path(project_path) / ".env" if project_path else Path(".env")
         lines = []
         for entry in entries:
             key = entry.get("key", "")
             val = entry.get("val", "")
             lines.append(f"{key}={val}")
         content = "\n".join(lines)
-        Path(".env").write_text(content)
-        return f"Written .env with {len(entries)} entries"
+        target.write_text(content)
+        return f"Written .env with {len(entries)} entries at {target}"
     except Exception as e:
         return f"Error writing .env: {e}"
 
-
-TOOL_DISPATCH = {
-    "read_file": lambda args: _safe_read(args.get("path", "")),
-    "list_dir": lambda args: _safe_list_dir(args.get("path", "")),
-    "run_command": lambda args: _run_cmd(
-        args.get("command", ""),
-        args.get("cwd")
-    ),
-    "edit_file": lambda args: _edit_file(
-        args.get("path", ""),
-        args.get("old_string", ""),
-        args.get("new_string", "")
-    ),
-    "write_file": lambda args: _write_file(
-        args.get("path", ""),
-        args.get("content", "")
-    ),
-    "search_web": lambda args: _search_web(args.get("query", "")),
-    "set_env": lambda args: _set_env(args.get("name", ""), args.get("value", "")),
-    "install_package": lambda args: _install_package(args.get("name", "")),
-    "write_env_file": lambda args: _write_env_file(args.get("entries", [])),
-}
 
 
 def agent_run(
@@ -184,6 +191,7 @@ def agent_run(
     max_steps: int = 30,
     console=None,
     plan: dict | None = None,
+    auto_yes: bool = False,
 ) -> dict:
     cfg = load_config()
     if not cfg.get("api_key"):
@@ -195,16 +203,54 @@ def agent_run(
         if c:
             c.print(msg)
 
+    def _ask_user(question: str, secret: bool = False) -> str:
+        if auto_yes:
+            return ""
+        try:
+            val = input(f"  \U0001f4ac Agent asks: {question}: ")
+            return val.strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+    tool_dispatch = {
+        "read_file": lambda args: _safe_read(args.get("path", "")),
+        "list_dir": lambda args: _safe_list_dir(args.get("path", "")),
+        "run_command": lambda args: _run_cmd(
+            args.get("command", ""),
+            args.get("cwd")
+        ),
+        "edit_file": lambda args: _edit_file(
+            args.get("path", ""),
+            args.get("old_string", ""),
+            args.get("new_string", "")
+        ),
+        "write_file": lambda args: _write_file(
+            args.get("path", ""),
+            args.get("content", "")
+        ),
+        "search_web": lambda args: _search_web(args.get("query", "")),
+        "set_env": lambda args: _set_env(args.get("name", ""), args.get("value", "")),
+        "install_package": lambda args: _install_package(args.get("name", "")),
+        "write_env_file": lambda args: _write_env_file(args.get("entries", []), project_path),
+        "ask_user": lambda args: _ask_user(
+            args.get("question", ""),
+            args.get("secret", False)
+        ),
+    }
+
     system = AGENT_SYSTEM_PROMPT + f"\nProject path: {project_path}"
 
     context = f"""Task: {task}
 Project: {project_path}
 Project plan: {json.dumps(plan or {})}
+Environment variables already set: {list(os.environ.keys())[:50]}
 
-Work through this step by step. Use tools to explore, understand, and execute."""
+Work through this step by step. Use tools to explore, understand, and execute.
+IMPORTANT: You can ask the user for API keys, passwords, or choices using ask_user."""
 
     steps_taken = 0
     last_result = None
+    error_history = []
 
     while steps_taken < max_steps:
         steps_taken += 1
@@ -212,6 +258,7 @@ Work through this step by step. Use tools to explore, understand, and execute.""
         prompt = f"""{context}
 
 Previous result: {last_result if last_result else 'Starting...'}
+Errors so far: {'; '.join(error_history[-3:]) if error_history else 'None'}
 
 Step {steps_taken}/{max_steps}. What should I do next?
 Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{}}, "done": bool}}"""
@@ -232,7 +279,7 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
             else:
                 if c:
                     cprint(f"  [yellow]Agent: unexpected response format, retrying...[/]")
-                    continue
+                continue
 
             if response.strip().startswith('{"error"'):
                 err = json.loads(response)
@@ -265,14 +312,31 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
         tool = action.get("action")
         args = action.get("args", {})
 
-        if tool in TOOL_DISPATCH:
+        if tool == "ask_user":
+            if c:
+                cprint(f"  [cyan]  Agent needs your input[/]")
+            user_input = _ask_user(
+                args.get("question", ""),
+                args.get("secret", False)
+            )
+            if not user_input.strip():
+                last_result = "User skipped (empty input)"
+            else:
+                last_result = f"User responded: {user_input[:200]}"
+                if args.get("secret"):
+                    last_result = "User provided the requested value"
+            continue
+
+        if tool in tool_dispatch:
             try:
-                result = TOOL_DISPATCH[tool](args)
+                result = tool_dispatch[tool](args)
                 last_result = result[:2000]
             except Exception as e:
                 last_result = f"Tool error: {e}"
+                error_history.append(f"{tool}: {e}")
         else:
             last_result = f"Unknown tool: {tool}"
+            error_history.append(f"Unknown tool: {tool}")
 
     return {
         "status": "max_steps",
@@ -287,6 +351,7 @@ def agent_process_instructions(
     project_path: str,
     plan: dict | None = None,
     console=None,
+    auto_yes: bool = False,
 ) -> dict:
     cfg = load_config()
     if not cfg.get("api_key"):
@@ -305,11 +370,13 @@ def agent_process_instructions(
         f"If the instruction says 'install redis' or 'install postgres', use install_package.\n"
         f"If the instruction says 'set all other env random', read .env.example, "
         f"then use write_env_file with random values for each entry.\n"
-        f"If the instruction says 'use python3' or similar, use set_env for RUNIT_PYTHON.",
+        f"If the instruction says 'use python3' or similar, use set_env for RUNIT_PYTHON.\n"
+        f"IMPORTANT: If you need an API key or any input from the user, use ask_user.",
         project_path,
         max_steps=25,
         console=c,
         plan=plan,
+        auto_yes=auto_yes,
     )
 
     return result

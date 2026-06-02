@@ -23,7 +23,7 @@ from runit.notify import notify_done
 from runit.environment import detect_env, env_info, has_docker, is_notebook_env
 from runit.web_tools import web_search, fetch_github_readme
 from runit.agent import agent_run, agent_analyze_project, agent_process_instructions
-from runit.services import start_required_services, detect_required_services, get_service_urls
+from runit.services import start_required_services, detect_required_services, get_service_urls, update_env_with_service_urls
 from runit.cli import AUTO_YES as CLI_AUTO_YES
 
 
@@ -42,6 +42,41 @@ _CRITICAL_ENV_PATTERNS = [
     "resend_api_key",
     "llmgateway_api_key",
     "gateway_api_key",
+    "groq_api_key", "grok_api_key",
+    "claude_api_key", "gemini_api_key",
+    "perplexity_api_key", "cohere_api_key",
+    "mistral_api_key", "together_api_key",
+    "replicate_api_token", "huggingface_token",
+    "elevenlabs_api_key", "deepgram_api_key",
+    "assemblyai_api_key", "azure_api_key",
+    "datadog_api_key", "sentry_dsn",
+    "new_relic_license_key",
+    "logz_io_token", "papertrail_api_token",
+    "mongodb_uri", "redis_url", "database_url",
+    "postgres_url", "mysql_url",
+    "amqp_url", "rabbitmq_url",
+    "elasticsearch_url", "meilisearch_url",
+    "typesense_api_key", "algolia_api_key",
+    "pinecone_api_key", "qdrant_api_key",
+    "weaviate_api_key", "chroma_api_key",
+    "milvus_url", "cassandra_host",
+    "s3_access_key", "s3_secret_key",
+    "aws_access_key_id", "aws_secret_access_key",
+    "gcp_service_account", "azure_connection_string",
+    "supabase_url", "supabase_key",
+    "firebase_api_key", "firebase_private_key",
+    "sendgrid_api_key", "mailgun_api_key",
+    "postmark_api_token", "smtp_password",
+    "twilio_account_sid", "twilio_auth_token",
+    "vonage_api_key", "nexmo_api_key",
+    "plaid_client_id", "plaid_secret",
+    "square_access_token", "square_location_id",
+    "paypal_client_id", "paypal_client_secret",
+    "razorpay_key_id", "razorpay_key_secret",
+    "coinbase_api_key", "binance_api_key",
+    "alchemy_api_key", "infura_project_id",
+    "moralis_api_key", "quicknode_endpoint",
+    "etherscan_api_key", "bscscan_api_key",
 ]
 
 
@@ -50,7 +85,7 @@ def _is_critical_env(var: str) -> bool:
     for pattern in _CRITICAL_ENV_PATTERNS:
         if pattern in lower:
             return True
-    return len(lower) < 30 or "key" in lower or "secret" in lower or "token" in lower or "url" in lower
+    return False
 
 
 def _categorize_env_vars(plan: dict, project_path: str) -> tuple[list[str], list[str]]:
@@ -327,6 +362,10 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     service_results = start_required_services(project_path, plan, env_type=env_type)
     plan["_services_started"] = service_results
 
+    svc_urls = update_env_with_service_urls(project_path, service_results)
+    if svc_urls:
+        print(f"  \u2705 Added {len(svc_urls)} service URLs to .env")
+
     skill = get_skill(plan.get("type", ""))
     if skill:
         print_step(4, 8, f"Agent skill loaded: {skill['name']}", "done")
@@ -356,7 +395,8 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
             if c:
                 c.print(f"  [cyan]Agent processing complex instructions...[/]")
             agent_result = agent_process_instructions(
-                user_instructions, project_path, plan, console=c
+                user_instructions, project_path, plan, console=c,
+                auto_yes=cli_mod.AUTO_YES
             )
             if agent_result.get("status") == "success":
                 plan["_agent_instructions_result"] = agent_result.get("result", "")
@@ -464,6 +504,7 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
                 f"Fix this error and get the project running. Error: {last_error[:1000]}",
                 project_path,
                 max_steps=8,
+                auto_yes=cli_mod.AUTO_YES,
             )
             if agent_result.get("status") == "success":
                 manual_steps.append(agent_result.get("result", ""))

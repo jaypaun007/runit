@@ -276,6 +276,46 @@ def start_service(service_key: str) -> tuple[bool, str]:
     return False, f"Could not start {svc['name']} (try installing Docker or running it manually)"
 
 
+def _install_service_via_apt(service_key: str) -> bool:
+    apt_packages = {
+        "postgresql": "postgresql postgresql-client",
+        "redis": "redis-server",
+        "mysql": "mysql-server",
+        "mongodb": "mongodb",
+        "rabbitmq": "rabbitmq-server",
+        "mariadb": "mariadb-server",
+        "nginx": "nginx",
+        "sqlite": "sqlite3",
+        "clickhouse": "clickhouse-server",
+        "neo4j": "neo4j",
+    }
+    pkg = apt_packages.get(service_key)
+    if not pkg:
+        return False
+    try:
+        subprocess.run(
+            f"apt-get update -qq && apt-get install -y -qq {pkg}",
+            shell=True, capture_output=True, text=True, timeout=120
+        )
+        return _check_service_running(service_key)
+    except Exception:
+        return False
+
+
+def _start_cloud_service(service_key: str) -> tuple[bool, str]:
+    svc = SERVICES.get(service_key)
+    if not svc:
+        return False, f"Unknown service: {service_key}"
+
+    if _check_service_running(service_key):
+        return True, f"{svc['name']} already running on port {svc['default_port']}"
+
+    if _install_service_via_apt(service_key):
+        return True, f"{svc['name']} installed and started via apt-get"
+
+    return False, f"{svc['name']} — could not install in cloud (set env var manually)"
+
+
 def start_required_services(project_path: str, plan: dict | None = None,
                              env_type: str = "local") -> list[dict]:
     c = _console()
@@ -290,13 +330,15 @@ def start_required_services(project_path: str, plan: dict | None = None,
     if is_cloud:
         if c:
             c.print(f"\n  [bold cyan]\U0001f6e0  Required services detected: {', '.join(required)}[/]")
-            c.print(f"  [yellow]  Cloud environment detected — services need to be configured via env vars[/]")
-            c.print(f"  [yellow]  Set DATABASE_URL, REDIS_URL, etc. manually or use --instructions[/]")
+            c.print(f"  [yellow]  Trying apt-get install for cloud environment...[/]")
         for svc_key in required:
-            results.append({"service": svc_key, "ok": False,
-                            "message": f"{SERVICES[svc_key]['name']} — set env var in cloud (Docker unavailable)"})
             if c:
-                c.print(f"  \u26a0\ufe0f  {SERVICES[svc_key]['name']}: set env var manually")
+                c.print(f"  [yellow]Starting {SERVICES[svc_key]['name']} via apt-get...[/]")
+            ok, msg = _start_cloud_service(svc_key)
+            results.append({"service": svc_key, "ok": ok, "message": msg})
+            if c:
+                icon = "\u2705" if ok else "\u26a0\ufe0f"
+                c.print(f"  {icon} {msg}")
         return results
 
     if c:
@@ -320,3 +362,80 @@ def get_service_urls() -> dict:
         if _check_service_running(key):
             urls[key] = f"localhost:{svc['default_port']}"
     return urls
+
+
+SERVICE_CONNECTION_URLS = {
+    "postgresql": {
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/app",
+        "POSTGRES_URL": "postgresql://postgres:postgres@localhost:5432/app",
+        "PGHOST": "localhost",
+        "PGPORT": "5432",
+    },
+    "redis": {
+        "REDIS_URL": "redis://localhost:6379/0",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+    },
+    "mysql": {
+        "DATABASE_URL": "mysql://root:root@localhost:3306/app",
+        "MYSQL_HOST": "localhost",
+        "MYSQL_PORT": "3306",
+    },
+    "mongodb": {
+        "MONGODB_URL": "mongodb://localhost:27017/app",
+        "MONGO_URL": "mongodb://localhost:27017/app",
+    },
+    "rabbitmq": {
+        "RABBITMQ_URL": "amqp://guest:guest@localhost:5672/",
+        "AMQP_URL": "amqp://guest:guest@localhost:5672/",
+    },
+    "elasticsearch": {
+        "ELASTICSEARCH_URL": "http://localhost:9200",
+        "ES_URL": "http://localhost:9200",
+    },
+    "mariadb": {
+        "DATABASE_URL": "mysql://root:root@localhost:3306/app",
+        "MARIADB_URL": "mysql://root:root@localhost:3306/app",
+    },
+    "clickhouse": {
+        "CLICKHOUSE_URL": "http://localhost:8123",
+    },
+    "neo4j": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_URL": "bolt://localhost:7687",
+    },
+    "minio": {
+        "MINIO_URL": "http://localhost:9000",
+        "S3_ENDPOINT": "http://localhost:9000",
+    },
+}
+
+
+def update_env_with_service_urls(project_path: str, started_services: list[dict]) -> dict:
+    env_file = Path(project_path) / ".env"
+    if not env_file.exists():
+        return {}
+
+    added = {}
+    content = env_file.read_text(encoding="utf-8", errors="replace")
+    existing = set()
+    for line in content.splitlines():
+        if "=" in line and not line.strip().startswith("#"):
+            key = line.split("=", 1)[0].strip()
+            existing.add(key)
+
+    updates = []
+    for svc_result in started_services:
+        if not svc_result.get("ok"):
+            continue
+        svc_key = svc_result["service"]
+        urls = SERVICE_CONNECTION_URLS.get(svc_key, {})
+        for var, url in urls.items():
+            if var not in existing:
+                updates.append(f"{var}={url}")
+                added[var] = url
+
+    if updates:
+        env_file.write_text(content.rstrip() + "\n" + "\n".join(updates) + "\n")
+
+    return added

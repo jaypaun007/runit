@@ -133,8 +133,21 @@ pip install git+https://github.com/jaypaun007/runit.git
 ### Kaggle / Google Colab
 
 ```python
+# 1) Install
 !pip install --force-reinstall --no-cache-dir git+https://github.com/jaypaun007/runit.git
-!runit https://github.com/jaypaun007/repo --yes --plain --dev
+
+# 2) Set AI provider
+import os
+os.environ["RUNIT_API_KEY"] = "sk-your-key"
+os.environ["RUNIT_PROVIDER"] = "custom"
+os.environ["RUNIT_MODEL"] = "gpt-4"
+os.environ["RUNIT_BASE_URL"] = "https://api.example.com/v1"
+
+# 3) Run — auto-generates .env, skips 200+ prompts
+!runit https://github.com/theopenco/llmgateway --dev --yes --plain --generate-env --retries 10
+
+# Or with custom instructions
+!runit https://github.com/user/repo --dev --yes --plain --generate-env --instructions "use python3, set grok api key = gsk_xxx" --retries 10
 ```
 
 ---

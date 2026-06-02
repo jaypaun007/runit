@@ -236,7 +236,13 @@ def print_skill(skill: dict | None):
 def confirm(msg: str, default: bool = True) -> bool:
     if AUTO_YES:
         return True
-    if HAS_RICH:
+    is_notebook = False
+    try:
+        from runit.environment import is_notebook_env
+        is_notebook = is_notebook_env()
+    except Exception:
+        pass
+    if HAS_RICH and not is_notebook:
         return RichConfirm.ask(f"[bold]{msg}[/]", default=default)
     suffix = " [Y/n]" if default else " [y/N]"
     print(f"  {msg}{suffix}")
@@ -246,7 +252,7 @@ def confirm(msg: str, default: bool = True) -> bool:
             return default
         return val in ("y", "yes")
     except (EOFError, KeyboardInterrupt):
-        return False
+        return default
 
 
 def _is_tty() -> bool:
@@ -259,7 +265,13 @@ def _is_tty() -> bool:
 def prompt_input(msg: str, secret: bool = False, default: str = "") -> str:
     if AUTO_YES:
         return default
-    if HAS_RICH and _is_tty():
+    is_notebook = False
+    try:
+        from runit.environment import is_notebook_env
+        is_notebook = is_notebook_env()
+    except Exception:
+        pass
+    if HAS_RICH and _is_tty() and not is_notebook:
         from rich.prompt import Prompt
         if secret:
             return Prompt.ask(f"[bold]{msg}[/]", password=True, default=default)
@@ -270,13 +282,14 @@ def prompt_input(msg: str, secret: bool = False, default: str = "") -> str:
     prompt_text += ": "
     if secret:
         try:
-            if _is_tty():
+            if _is_tty() and not is_notebook:
                 import getpass
                 try:
                     return getpass.getpass(prompt_text) or default
                 except Exception:
                     pass
-            return input(prompt_text) or default
+            val = input(prompt_text)
+            return val.strip() or default
         except (EOFError, KeyboardInterrupt):
             return default
     try:
