@@ -22,7 +22,7 @@ from runit.debugger import deep_debug, print_debug_report, apply_code_patch
 from runit.notify import notify_done
 from runit.environment import detect_env, env_info, has_docker, is_notebook_env
 from runit.web_tools import web_search, fetch_github_readme
-from runit.agent import agent_run, agent_analyze_project
+from runit.agent import agent_run, agent_analyze_project, agent_process_instructions
 from runit.services import start_required_services, detect_required_services, get_service_urls
 from runit.cli import AUTO_YES as CLI_AUTO_YES
 
@@ -308,9 +308,23 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
         print(f"  \u2713 Using: {instructions}")
     else:
         user_instructions = prompt_input("Instructions").strip()
+
     if user_instructions:
         plan["_user_instructions"] = user_instructions
-        print(f"  \u2713 Noted: {user_instructions}")
+        # If instructions are complex (mention install, env, service, key), use agent
+        complex_keywords = ["install", "env", "service", "key=", "api key", "set up", "setup", "random"]
+        is_complex = any(kw in user_instructions.lower() for kw in complex_keywords)
+        if is_complex and not no_api_key:
+            c = cli_mod._console()
+            if c:
+                c.print(f"  [cyan]Agent processing complex instructions...[/]")
+            agent_result = agent_process_instructions(
+                user_instructions, project_path, plan, console=c
+            )
+            if agent_result.get("status") == "success":
+                plan["_agent_instructions_result"] = agent_result.get("result", "")
+        else:
+            print(f"  \u2713 Noted: {user_instructions}")
 
     # Prompt user for any required keys upfront (smart: only critical ones)
     required_env = plan.get("required_env", [])

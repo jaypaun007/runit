@@ -1,10 +1,12 @@
 import json
+import time
 import requests
 from runit.config import load_config
 
 
 def _openai_chat(prompt: str, system: str = "") -> str:
     cfg = load_config()
+    model = cfg["model"].strip()
     url = (cfg["base_url"] or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
     headers = {
         "Authorization": f"Bearer {cfg['api_key']}",
@@ -16,7 +18,7 @@ def _openai_chat(prompt: str, system: str = "") -> str:
     messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "model": cfg["model"],
+        "model": model,
         "messages": messages,
         "temperature": 0.1,
         "max_tokens": 2000,
@@ -29,6 +31,7 @@ def _openai_chat(prompt: str, system: str = "") -> str:
 
 def _anthropic_chat(prompt: str, system: str = "") -> str:
     cfg = load_config()
+    model = cfg["model"].strip()
     url = (cfg["base_url"] or "https://api.anthropic.com/v1").rstrip("/") + "/messages"
     headers = {
         "x-api-key": cfg["api_key"],
@@ -37,7 +40,7 @@ def _anthropic_chat(prompt: str, system: str = "") -> str:
     }
 
     payload = {
-        "model": cfg["model"],
+        "model": model,
         "max_tokens": 2000,
         "messages": [{"role": "user", "content": prompt}],
     }
@@ -49,18 +52,42 @@ def _anthropic_chat(prompt: str, system: str = "") -> str:
     return resp.json()["content"][0]["text"].strip()
 
 
-def llm_call(prompt: str, system: str = "") -> str:
+def llm_call(prompt: str, system: str = "", max_retries: int = 5) -> str:
     cfg = load_config()
     if not cfg.get("api_key"):
         return _fallback_response(prompt)
 
-    try:
-        if cfg["provider"] == "anthropic":
-            return _anthropic_chat(prompt, system)
-        return _openai_chat(prompt, system)
-    except requests.RequestException as e:
-        print(f"  \u26a0\ufe0f API call failed: {e}")
-        return _fallback_response(prompt)
+    last_error = ""
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                time.sleep(2 ** attempt)
+            if cfg["provider"] == "anthropic":
+                return _anthropic_chat(prompt, system)
+            return _openai_chat(prompt, system)
+        except requests.RequestException as e:
+            last_error = str(e)
+            status = 0
+            if hasattr(e, 'response') and e.response is not None:
+                status = e.response.status_code
+            if status in (429, 500, 502, 503, 504):
+                continue
+            if status == 400:
+                return json.dumps({
+                    "error": f"API 400 error - check model name, base URL, and API key: {last_error}",
+                    "hint": "Make sure RUNIT_MODEL has no trailing spaces and RUNIT_BASE_URL is correct"
+                })
+            if attempt == max_retries - 1:
+                print(f"  \u26a0\ufe0f API call failed after {max_retries} retries: {last_error}")
+                return _fallback_response(prompt)
+        except Exception as e:
+            last_error = str(e)
+            if attempt == max_retries - 1:
+                print(f"  \u26a0\ufe0f API call failed: {last_error}")
+                return _fallback_response(prompt)
+
+    print(f"  \u26a0\ufe0f API call failed after {max_retries} retries: {last_error}")
+    return _fallback_response(prompt)
 
 
 _MOCK_PLAN = {

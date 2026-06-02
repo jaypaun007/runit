@@ -2,30 +2,42 @@ import os
 import sys
 import json
 import subprocess
+import random
+import string
 from pathlib import Path
 
-from runit.config import load_config
+from runit.config import load_config, save_key
 from runit.llm import llm_call
 from runit.web_tools import web_search
 from runit.cli import _console, print_step, FORCE_PLAIN
 
 AGENT_SYSTEM_PROMPT = """You are Runit Agent v1.2, an autonomous AI coding agent.
-Your job is to analyze projects, plan execution steps, run commands, and modify code.
+Your job is to analyze projects, plan execution steps, run commands, modify code, and handle complex setup instructions.
 
 You have these tools available:
 1. read_file(path) - Read file contents
-2. search_web(query) - Search for solutions online  
+2. search_web(query) - Search for solutions online
 3. list_dir(path) - List directory contents
-4. run_command(cmd) - Execute a shell command
-5. edit_file(path, old, new) - Modify a file
+4. run_command(cmd, cwd) - Execute a shell command
+5. edit_file(path, old_string, new_string) - Modify a file
 6. write_file(path, content) - Write a new file
+7. set_env(name, value) - Set an environment variable
+8. install_package(name) - Install a system package via apt
+9. write_env_file(entries) - Write a .env file with key=value pairs (entries is a list of {key, val})
+
+When given complex natural language instructions like:
+- "use python3 instead of python" -> set _user_instructions
+- "use grok api key = sk-xxx" -> set env var
+- "install redis and postgres" -> run commands to install/setup
+- "set all other env random" -> generate random values for missing env vars
+- "set up all env" -> read .env.example, generate values for each var
 
 Always respond in this JSON format:
 {"thought": "brief analysis", "action": "tool_name", "args": {...}, "done": false}
-Or when complete:
-{"thought": "task complete", "action": "done", "result": "...", "done": true}
+When complete:
+{"thought": "summary", "action": "done", "result": "...", "done": true}
 
-Be concise. Execute one step at a time."""
+Be concise. Execute one step at a time. For complex instructions, break into multiple steps."""
 
 
 def _safe_read(path: str) -> str:
@@ -34,7 +46,7 @@ def _safe_read(path: str) -> str:
         if not p.exists():
             return f"File not found: {path}"
         if p.stat().st_size > 50000:
-            return f"File too large ({p.stat().st_size} bytes), showing first 1000 lines:\n" + p.read_text(encoding="utf-8", errors="replace")[:50000]
+            return f"File too large, showing first 1000 lines:\n" + p.read_text(encoding="utf-8", errors="replace")[:50000]
         return p.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
         return f"Error reading {path}: {e}"
@@ -59,7 +71,7 @@ def _run_cmd(command: str, cwd: str | None = None) -> str:
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,
-            timeout=120, cwd=cwd
+            timeout=180, cwd=cwd
         )
         output = result.stdout or ""
         if result.stderr:
@@ -68,7 +80,7 @@ def _run_cmd(command: str, cwd: str | None = None) -> str:
             output += f"\n(exit code: {result.returncode})"
         return output[-3000:] if len(output) > 3000 else output
     except subprocess.TimeoutExpired:
-        return "Command timed out (120s)"
+        return "Command timed out (180s)"
     except Exception as e:
         return f"Error running command: {e}"
 
@@ -107,6 +119,42 @@ def _search_web(query: str) -> str:
         return f"Web search failed: {e}"
 
 
+def _set_env(name: str, value: str) -> str:
+    try:
+        os.environ[name] = value
+        save_key(name, value)
+        return f"Environment variable {name} set"
+    except Exception as e:
+        return f"Error setting env var {name}: {e}"
+
+
+def _install_package(name: str) -> str:
+    try:
+        result = subprocess.run(
+            f"apt-get install -y {name} 2>/dev/null || pip install {name} 2>/dev/null",
+            shell=True, capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            return f"Package {name} installed successfully"
+        return f"Could not install {name}: {result.stderr[:500]}"
+    except Exception as e:
+        return f"Error installing {name}: {e}"
+
+
+def _write_env_file(entries: list[dict]) -> str:
+    try:
+        lines = []
+        for entry in entries:
+            key = entry.get("key", "")
+            val = entry.get("val", "")
+            lines.append(f"{key}={val}")
+        content = "\n".join(lines)
+        Path(".env").write_text(content)
+        return f"Written .env with {len(entries)} entries"
+    except Exception as e:
+        return f"Error writing .env: {e}"
+
+
 TOOL_DISPATCH = {
     "read_file": lambda args: _safe_read(args.get("path", "")),
     "list_dir": lambda args: _safe_list_dir(args.get("path", "")),
@@ -124,6 +172,9 @@ TOOL_DISPATCH = {
         args.get("content", "")
     ),
     "search_web": lambda args: _search_web(args.get("query", "")),
+    "set_env": lambda args: _set_env(args.get("name", ""), args.get("value", "")),
+    "install_package": lambda args: _install_package(args.get("name", "")),
+    "write_env_file": lambda args: _write_env_file(args.get("entries", [])),
 }
 
 
@@ -210,6 +261,39 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
     }
 
 
+def agent_process_instructions(
+    instructions: str,
+    project_path: str,
+    plan: dict | None = None,
+    console=None,
+) -> dict:
+    cfg = load_config()
+    if not cfg.get("api_key"):
+        return {"status": "no_api", "message": "AI agent requires an API key for processing instructions"}
+
+    c = console or _console()
+
+    if c:
+        c.print(f"  [cyan]Agent processing your instructions: {instructions[:100]}...[/]")
+
+    result = agent_run(
+        f"Process these setup instructions step by step: {instructions}\n\n"
+        f"Read the project structure first, then execute each instruction.\n"
+        f"If the instruction mentions setting an API key like 'use X api key = Y', "
+        f"set it as an environment variable with set_env.\n"
+        f"If the instruction says 'install redis' or 'install postgres', use install_package.\n"
+        f"If the instruction says 'set all other env random', read .env.example, "
+        f"then use write_env_file with random values for each entry.\n"
+        f"If the instruction says 'use python3' or similar, use set_env for RUNIT_PYTHON.",
+        project_path,
+        max_steps=25,
+        console=c,
+        plan=plan,
+    )
+
+    return result
+
+
 def agent_analyze_project(project_path: str, plan: dict | None = None) -> dict:
     cfg = load_config()
     if not cfg.get("api_key"):
@@ -241,6 +325,3 @@ def agent_analyze_project(project_path: str, plan: dict | None = None) -> dict:
         findings[f"step_{i}"] = result.get("result", "")
 
     return findings
-
-
-
