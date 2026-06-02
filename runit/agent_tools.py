@@ -98,12 +98,16 @@ def tool_research_project(project_path: str, args: dict) -> dict:
     url = args.get("url", "")
     data = {"readme": "", "ci_config": "", "package_config": "", "scripts": [], "deps": [], "web_results": []}
 
-    try:
-        readme = fetch_github_readme(url)
-        if readme:
-            data["readme"] = readme[:5000]
-    except Exception:
-        pass
+    # FIRST: read local files — always works
+    local_readme = Path(project_path) / "README.md"
+    if local_readme.exists():
+        data["readme"] = local_readme.read_text(errors="replace")[:5000]
+
+    for pkg in ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile", "composer.json"]:
+        full = Path(project_path) / pkg
+        if full.exists():
+            data["package_config"] = full.read_text(errors="replace")[:3000]
+            break
 
     ci_paths = [".github/workflows/ci.yml", ".github/workflows/main.yml",
                 ".gitlab-ci.yml", "Jenkinsfile"]
@@ -113,20 +117,30 @@ def tool_research_project(project_path: str, args: dict) -> dict:
             data["ci_config"] = full.read_text(errors="replace")[:3000]
             break
 
-    for pkg in ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile", "composer.json"]:
-        full = Path(project_path) / pkg
-        if full.exists():
-            data["package_config"] = full.read_text(errors="replace")[:3000]
-            break
+    env_examples = list(Path(project_path).glob(".env*"))
+    if env_examples:
+        data["env_examples"] = [e.name for e in env_examples]
+
+    data["file_tree"] = [str(f.relative_to(project_path)) for f in sorted(Path(project_path).iterdir())
+                         if not f.name.startswith(".") and not f.name.startswith("node_modules")]
+
+    # THEN: try remote
+    try:
+        if url and ("github.com" in url or "http" in url):
+            readme = fetch_github_readme(url)
+            if readme:
+                data["readme_remote"] = readme[:3000]
+    except Exception:
+        pass
 
     try:
-        name = url.rstrip("/").split("/")[-1] if url else "project"
-        results = web_search(f"how to run {name} setup and configure")
+        name = url.rstrip("/").split("/")[-1] if url else Path(project_path).name
+        results = web_search(f"how to run {name} {Path(project_path).name} setup guide")
         data["web_results"] = [r.get("title", "") + ": " + r.get("url", "") for r in results[:5]]
     except Exception:
         pass
 
-    return {"ok": True, "research": data, "_text": f"Research complete: README ({len(data['readme'])} chars), CI config found"}
+    return {"ok": True, "research": data, "_text": f"Project analysis: {len(data.get('file_tree', []))} files, README: {len(data.get('readme', ''))} chars, config: {bool(data.get('package_config'))}"}
 
 
 # ── Service Tools ──

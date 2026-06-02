@@ -17,10 +17,33 @@ class AgentCore:
         self.last_result = None
         self.error_history = []
         self.context = {}
+        self.action_history = []
 
     def cprint(self, msg):
         if self.c:
             self.c.print(msg)
+
+    def _is_repeating(self, tool: str, args: dict) -> bool:
+        sig = (tool, str(sorted(args.items())))
+        recent = self.action_history[-5:]
+        count = sum(1 for a in recent if a == sig)
+        if count >= 2:
+            self.error_history.append(f"Repeated action: {tool}")
+            return True
+        return False
+
+    def _force_new_tool(self):
+        tools_used = set(a[0] for a in self.action_history[-10:])
+        suggestions = []
+        if "research_project" in tools_used and "read_file" not in tools_used:
+            suggestions.append("read_file")
+        if "read_file" in tools_used and "run_command" not in tools_used:
+            suggestions.append("run_command")
+        if "list_dir" not in tools_used:
+            suggestions.append("list_dir")
+        if suggestions:
+            return f"You've been repeating tools. Try something different like: {', '.join(suggestions)}"
+        return ""
 
     def run(self, task: str, tools: dict) -> dict:
         cfg = load_config()
@@ -31,15 +54,24 @@ class AgentCore:
 Project: {self.project_path}
 
 Work through this step by step. Use tools to explore, understand, and execute.
-IMPORTANT: You can ask the user for API keys, passwords, or choices using ask_user."""
+IMPORTANT: 
+- You can ask the user for API keys, passwords, or choices using ask_user.
+- If research_project returns empty data, read files directly with read_file and list_dir.
+- NEVER call the same tool more than twice in a row. Try different approaches."""
 
         while self.steps_taken < self.max_steps:
             self.steps_taken += 1
+
+            extra_hint = self._force_new_tool()
+            warning = ""
+            if extra_hint:
+                warning = f"\n\n⚠️  {extra_hint}"
 
             prompt = f"""{context}
 
 Previous result: {self.last_result if self.last_result else 'Starting...'}
 Errors so far: {'; '.join(self.error_history[-3:]) if self.error_history else 'None'}
+{warning}
 
 Step {self.steps_taken}/{self.max_steps}. What should I do next?
 Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{}}, "done": bool}}"""
@@ -66,6 +98,14 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
                 tool = response.get("action")
                 args = response.get("args", {})
                 thought = response.get("thought", "")
+
+                if self._is_repeating(tool, args):
+                    if self.c:
+                        self.cprint(f"  [yellow]Breaking repeat cycle: {tool} called too many times[/]")
+                    self.last_result = "That tool was already called recently. Try a different approach."
+                    continue
+
+                self.action_history.append((tool, str(sorted(args.items()))))
 
                 if self.c:
                     self.cprint(f"  [dim]> {thought}[/]")
