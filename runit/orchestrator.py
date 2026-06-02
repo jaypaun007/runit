@@ -1,7 +1,6 @@
 import os
 import json
 import re
-import time
 import subprocess
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from runit.process_monitor import ProcessMonitor
 from runit.error_classifier import classify_error, get_auto_heal
 from runit.config import load_config
 from runit.skills import match_skills, detect_package_manager, get_skill, FRAMEWORK_ALIASES
+from runit.llm import llm_call
 from runit.executor import ensure_runtime
 
 
@@ -55,6 +55,10 @@ class Pipeline:
 
         print_step(3, 5, "Resolving environment variables...")
         self._resolve_env()
+
+        cfg = load_config()
+        if self.auto_yes and cfg.get("api_key"):
+            self._ai_generate_env()
 
         print_step(4, 5, "Installing dependencies...")
         install_ok = self._install_deps()
@@ -181,6 +185,51 @@ class Pipeline:
             print(f"    \U0001f511  {len(critical)} sensitive vars set (API keys, secrets)")
         if auto:
             print(f"    \U0001f504  {len(auto)} vars auto-generated")
+
+    def _ai_generate_env(self):
+        critical = [v for v in self.env_vars if is_critical(v)]
+        if not critical:
+            return
+
+        env_example = self.er.scan_env_example()
+        current_vals = {v: self.env_vars[v] for v in critical}
+        prompt_lines = [
+            "Generate realistic-looking placeholder values for these environment variables.",
+            "Follow the expected format for each type:",
+            "- API keys should match the service's key format (e.g., 'sk-...' for OpenAI, 'ghp_...' for GitHub)",
+            "- URLs should be valid connection strings (e.g., 'postgresql://user:pass@localhost:5432/db')",
+            "- Passwords and secrets should be strong random strings",
+            "- Never use 'your-api-key-here' or 'changeme' — generate a real-looking value",
+            "",
+            "Current random values (replace these with realistic ones):",
+        ]
+        for v in critical:
+            example_val = env_example.get(v, "")
+            hint = f"  [example: {example_val[:30]}]" if example_val and example_val != v.lower() else ""
+            prompt_lines.append(f"- {v} = {current_vals[v]}{hint}")
+
+        prompt_lines.extend([
+            "",
+            "Return ONLY a valid JSON object like: {\"VAR_NAME\": \"realistic_value\", ...}",
+            "No markdown, no backticks, no explanation.",
+        ])
+
+        try:
+            raw = llm_call("\n".join(prompt_lines))
+            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
+            ai_vals = json.loads(raw)
+            if not isinstance(ai_vals, dict):
+                return
+            for v in critical:
+                if v in ai_vals and ai_vals[v]:
+                    self.env_vars[v] = ai_vals[v]
+                    self.er.categories[v] = "ai_generated"
+            updated = {v: self.env_vars[v] for v in critical if v in ai_vals}
+            if updated:
+                self.er.update_env_file(updated)
+                print(f"    \U0001f916  AI generated {len(updated)} env values")
+        except Exception:
+            pass
 
     def _install_deps(self) -> bool:
         root = Path(self.project_path)
