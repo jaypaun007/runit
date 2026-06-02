@@ -46,6 +46,8 @@ class Pipeline:
         self.required_services = []
         self.env_vars = {}
         self.server_info = {}
+        self.ai_plan = None
+        self.tunnel_urls = {}
         _init_state(project_path, env_type)
 
     def run(self) -> dict:
@@ -54,8 +56,26 @@ class Pipeline:
             self.c.print(f"  [dim]Project: {self.project_name}  |  Path: {self.project_path}[/]")
             self.c.print()
 
-        print_step(1, 5, "Analyzing project structure...")
-        self._analyze()
+        cfg = load_config()
+        if cfg.get("api_key"):
+            self._ai_plan()
+
+        if not self.ai_plan:
+            print_step(1, 5, "Analyzing project structure...")
+            self._analyze()
+        else:
+            plan = self.ai_plan
+            print_step(1, 5, "Using AI-generated plan...")
+            self.project_type = plan.get("project_type", "python")
+            self.package_manager = plan.get("package_manager", "npm") or "npm"
+            self.run_command = plan.get("run_command", "")
+            for svc in plan.get("services", []):
+                if svc not in self.required_services:
+                    self.required_services.append(svc)
+            print(f"  \U0001f916  {plan.get('description', '')[:80]}")
+            print(f"  \U0001f4e6  Type: {self.project_type}  |  PM: {self.package_manager}")
+            if self.required_services:
+                print(f"  \U0001f6e0  Services: {', '.join(self.required_services)}")
 
         print_step(2, 5, "Detecting and setting up services...")
         self._setup_services()
@@ -63,7 +83,6 @@ class Pipeline:
         print_step(3, 5, "Resolving environment variables...")
         self._resolve_env()
 
-        cfg = load_config()
         if self.auto_yes and not is_notebook_env() and cfg.get("api_key"):
             self._ai_generate_env()
 
@@ -87,6 +106,8 @@ class Pipeline:
             public_url = self._start_cloudflare_tunnel(port or result.get("port"))
             if public_url:
                 result["public_url"] = public_url
+                self.tunnel_urls["app"] = public_url
+            self._start_dashboard_server()
             self._dashboard(result)
             return {"status": "success", "result": result}
 
@@ -103,11 +124,58 @@ class Pipeline:
             public_url = self._start_cloudflare_tunnel(port)
             if public_url:
                 agent_result["public_url"] = public_url
+            self._start_dashboard_server()
             self._dashboard(agent_result)
             return {"status": "success", "result": agent_result}
 
         self._print_failure(result)
         return {"status": "failed", "result": result}
+
+    def _ai_plan(self):
+        root = Path(self.project_path)
+        files = {}
+        for name in ("README.md", "package.json", "requirements.txt",
+                      ".env.example", "docker-compose.yml", "Makefile",
+                      "pyproject.toml", "Dockerfile", "docker-compose.yaml"):
+            p = root / name
+            if p.exists():
+                try:
+                    content = p.read_text(errors="replace")
+                    files[name] = content[:3000]
+                except Exception:
+                    pass
+
+        prompt = f"""You are a project analyst. Read these project files and create a run plan.
+
+Project path: {self.project_path}
+Project name: {self.project_name}
+
+Files found:
+"""
+        for name, content in files.items():
+            prompt += f"\n--- {name} ---\n{content}\n"
+
+        prompt += """
+Return a JSON plan with:
+- "project_type": "node" or "python" or "other"
+- "package_manager": "npm", "pnpm", "yarn", or "pip"
+- "services": list of required services from: postgresql, redis, mysql, mongodb, rabbitmq, mariadb, nginx, elasticsearch, clickhouse, neo4j
+- "run_command": the command to start the project (e.g. "npm run dev", "python app.py")
+- "description": one-line summary of what this project does
+- "install_hints": list of extra setup commands if needed
+- "entry_file": the main entry file if detectable
+
+Only return valid JSON, no markdown, no explanation."""
+
+        try:
+            raw = llm_call(prompt)
+            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
+            plan = json.loads(raw)
+            if isinstance(plan, dict):
+                self.ai_plan = plan
+                print(f"  \U0001f916  AI plan: {plan.get('description', '')[:80]}")
+        except Exception:
+            self.ai_plan = None
 
     def _analyze(self):
         root = Path(self.project_path)
@@ -638,15 +706,106 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
         except Exception:
             return None
 
+    def _dashboard_html(self):
+        rows = []
+        for name, entry in self.sm.running.items():
+            port = entry.get("port", entry["defs"]["port"])
+            url = entry["defs"].get("connection_url", "").format(host="localhost", port=port)
+            rows.append(f"""
+        <div class="card">
+          <h3>{name}</h3>
+          <p class="url">Local: <a href="{url}" target="_blank">{url}</a></p>
+        </div>""")
+
+        pid = ""
+        logfile = ""
+        app_local = ""
+        app_public = ""
+        if hasattr(self, 'server_info') and self.server_info:
+            pid = self.server_info.get("pid", "")
+            logfile = self.server_info.get("logfile", "")
+            app_local = self.server_info.get("url", "")
+        if self.tunnel_urls:
+            app_public = self.tunnel_urls.get("app", "")
+            for svc, url in list(self.tunnel_urls.items()):
+                if svc != "app" and url not in rows:
+                    rows.append(f"""
+        <div class="card">
+          <h3>{svc}</h3>
+          <p class="url">Public: <a href="{url}" target="_blank">{url}</a></p>
+        </div>""")
+
+        svc_rows = "".join(rows)
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runit Dashboard - {self.project_name}</title>
+<style>
+  * {{ box-sizing:border-box; margin:0; padding:0 }}
+  body {{ font:14px/1.5 system-ui,sans-serif; background:#0f172a; color:#e2e8f0; padding:2rem }}
+  h1 {{ font-size:1.5rem; margin-bottom:.25rem }}
+  .sub {{ color:#94a3b8; margin-bottom:2rem }}
+  .card {{ background:#1e293b; padding:1rem 1.5rem; border-radius:10px; margin-bottom:1rem }}
+  h3 {{ font-size:1rem; margin-bottom:.3rem; color:#a5b4fc; text-transform:capitalize }}
+  .url {{ font-size:.85rem }}
+  .url a {{ color:#6366f1; text-decoration:none }}
+  .url a:hover {{ text-decoration:underline }}
+  .meta {{ color:#64748b; font-size:.8rem; margin-top:.5rem }}
+  .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:1rem }}
+</style>
+</head>
+<body>
+<h1>⚡ {self.project_name}</h1>
+<p class="sub">Runit v2.0.1 — All running services and ports</p>
+<div class="grid">
+  <div class="card">
+    <h3>Application</h3>
+    {"<p class=\"url\">Local: <a href=\"" + app_local + "\" target=\"_blank\">" + app_local + "</a></p>" if app_local else ""}
+    {"<p class=\"url\">Public: <a href=\"" + app_public + "\" target=\"_blank\">" + app_public + "</a></p>" if app_public else ""}
+    {"<p class=\"meta\">PID: " + str(pid) + "</p>" if pid else ""}
+    {"<p class=\"meta\">Log: " + str(logfile) + "</p>" if logfile else ""}
+  </div>
+  {svc_rows}
+</div>
+<p class="meta" style="margin-top:2rem;text-align:center;color:#475569">Path: {self.project_path}</p>
+</body>
+</html>"""
+
+    def _start_dashboard_server(self):
+        html = self._dashboard_html()
+        class DashHandler(BaseHTTPRequestHandler):
+            def do_GET(self_):
+                self_.send_response(200)
+                self_.send_header("Content-Type", "text/html; charset=utf-8")
+                self_.end_headers()
+                self_.wfile.write(html.encode())
+            def log_message(self_, *a):
+                pass
+
+        port = self._find_free_port(9000)
+        try:
+            server = HTTPServer(("0.0.0.0", port), DashHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            public_url = self._start_cloudflare_tunnel(port)
+            if public_url:
+                self.tunnel_urls["dashboard"] = public_url
+                print(f"  \U0001f4ca  Dashboard: {public_url}")
+        except Exception:
+            pass
+
     def _dashboard(self, result: dict):
         url = result.get("url", "")
         port = result.get("port", "")
         pid = result.get("pid", "")
         logfile = result.get("logfile", "")
         public_url = result.get("public_url", "")
+        dashboard_url = self.tunnel_urls.get("dashboard", "")
 
         print(f"\n  \u2705  {self.project_name} is running!")
         print(f"  {'=' * 50}")
+        if dashboard_url:
+            print(f"  \U0001f4ca  Dashboard: {dashboard_url}")
         if public_url:
             print(f"  \U0001f310  Public: {public_url}")
         if url:
