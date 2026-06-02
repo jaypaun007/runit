@@ -1,12 +1,8 @@
-<p align="center">
-  <img src="assets/banner.svg" alt="Runit Banner" width="100%">
-</p>
-
-<div align="center">
+![Runit Banner](assets/banner.svg)
 
 # ⚡ Runit
 
-**AI-powered agent that makes any GitHub repo runnable — automatically.**
+**AI-powered execution agent — makes any GitHub repo runnable with one command.**
 
 No manual setup. No dependency hunting. No config files. **Just run.**
 
@@ -16,32 +12,35 @@ No manual setup. No dependency hunting. No config files. **Just run.**
 [![GitHub release](https://img.shields.io/github/v/release/jaypaun007/runit)]()
 [![GitHub stars](https://img.shields.io/github/stars/jaypaun007/runit?style=social)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]()
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Quick Start](#-quick-start)
-- [Features](#-features)
-- [Installation](#-installation)
-- [Usage](#-usage)
-- [Agent Skills](#-agent-skills)
-- [Advanced Debugger](#-advanced-debugger)
-- [How It Works](#-how-it-works)
-- [Bring Your Own Key](#-bring-your-own-key-byok)
-- [How-To Guides](#-how-to-guides)
-- [Configuration](#-configuration)
-- [Architecture](#-architecture)
-- [Contributing](#-contributing)
-- [License](#-license)
+- [Quick Start](#quick-start)
+- [About](#about)
+- [What is Runit?](#what-is-runit)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Agent Skills](#agent-skills)
+- [Advanced Debugger](#advanced-debugger)
+- [How It Works](#how-it-works)
+- [Bring Your Own Key](#bring-your-own-key-byok)
+- [How-To Guides](#how-to-guides)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Run any GitHub repo — one command
-runit https://github.com/user/repo
+runit https://github.com/jaypaun007/repo
 
 # Run your local project
 runit .
@@ -50,32 +49,62 @@ runit .
 runit --setup
 ```
 
-> **One command. Zero config. Any repo. Any language.**
+> One command. Zero config. Any repo. Any language.
 
 ---
 
-## ✨ Features
+## About
+
+**Runit** is an open-source CLI tool by [Jay Paun](https://github.com/jaypaun007) that eliminates the friction of running unfamiliar code. Instead of reading docs, installing toolchains, hunting for entry points, and debugging setup scripts — you give Runit a URL and it does the rest.
+
+It combines **AI-powered project analysis** with **17 language-specific execution skills** to clone, analyze, install, run, and debug any GitHub repository automatically. Whether you are evaluating a library, spinning up a hackathon project, or testing a PR — Runit turns `git clone && cd && read && configure && install && build && run` into a single command.
+
+Runit was built to solve a simple problem: **most open-source projects never get run because the setup is too painful.** By automating the entire setup-to-execution pipeline, Runit makes code exploration as easy as visiting a website.
+
+- **License:** MIT
+- **Author:** [Jay Paun](https://github.com/jaypaun007)
+- **Repository:** [github.com/jaypaun007/runit](https://github.com/jaypaun007/runit)
+- **Latest release:** [v1.1.0](https://github.com/jaypaun007/runit/releases)
+
+---
+
+## What is Runit?
+
+Runit is an **AI-powered execution agent** that automatically figures out how to run any project from a GitHub URL or local folder. It analyzes the codebase, detects the language and framework, installs dependencies, and executes the project — handling errors and retrying with smarter strategies until it works.
+
+Think of it as **`pip install` for entire repositories**. No more reading READMEs, hunting for dependency instructions, or debugging setup scripts. Just point Runit at a repo and it handles everything.
+
+### Who is it for?
+
+- **Developers** trying to quickly evaluate a new library or tool
+- **Hackathon participants** spinning up unfamiliar projects
+- **Open source maintainers** testing contributions
+- **Students** learning from GitHub repos
+- **Anyone** tired of manual project setup
+
+---
+
+## Features
 
 | Feature | Description |
 |---------|-------------|
-| 🔌 One-command execution | `runit https://github.com/user/repo` — done |
-| 🧠 AI-powered analysis | Understands project structure, finds entry points, detects deps |
-| 📦 Smart dependency install | Installs only what's needed per project type |
-| 🔄 Auto error recovery | Detects failures, fixes them, retries persistently |
-| 🐛 Advanced Debugger | Deep error classification, language detection, code patch suggestions |
-| 🛠️ 17 Agent Skills | Python, Node.js, Rust, Go, Ruby, Deno, Java, C/C++, C#, PHP, Kotlin, Dart, R, Julia, Lua, Scala, Elixir |
-| 🔑 BYOK | Bring Your Own Key — OpenAI, Anthropic, or any custom endpoint |
-| 💬 User instructions | Tell Runit how to run your project |
-| 🌐 Web research | Searches online for error solutions when stuck |
-| 🖥️ Private repos | Authenticate with `--token` or `GITHUB_TOKEN` |
-| 🔐 Key management | Store API keys securely in `~/.runit/keys.json` |
-| 📖 GitHub README reader | Fetches README without cloning for better analysis |
-| 🎨 Beautiful CLI | Rich colored output with progress indicators |
-| ☁️ Cloud-native | Works on macOS, Linux, Windows, Kaggle, Google Colab |
+| One-command execution | `runit https://github.com/jaypaun007/repo` — done |
+| AI-powered analysis | Understands project structure, finds entry points |
+| Smart dependency install | Installs only what's needed per project type |
+| Auto error recovery | Detects failures, fixes them, retries |
+| Advanced Debugger | Error classification, language detection, code patches |
+| 17 Agent Skills | Python, Node, Rust, Go, Ruby, Deno, Java, C/C++, C#, PHP, Kotlin, Dart, R, Julia, Lua, Scala, Elixir |
+| BYOK (Bring Your Own Key) | OpenAI, Anthropic, or any custom endpoint |
+| User instructions | Tell Runit how to run your project |
+| Web research | Searches online for error solutions |
+| Private repos | Authenticate with token or env var |
+| Key management | Store API keys securely |
+| Beautiful CLI | Rich colored output |
+| Cloud-native | macOS, Linux, Windows, Kaggle, Google Colab |
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### macOS / Linux
 
@@ -101,35 +130,29 @@ cd runit
 pip install git+https://github.com/jaypaun007/runit.git
 ```
 
-### PyPI (when published)
-
-```bash
-pip install runit
-```
-
 ### Kaggle / Google Colab
 
 ```python
 !pip install git+https://github.com/jaypaun007/runit.git
-!runit https://github.com/user/some-project
+!runit https://github.com/jaypaun007/demo-project
 ```
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### Basic Commands
 
 ```bash
 # Run a GitHub repository
-runit https://github.com/user/some-project
+runit https://github.com/jaypaun007/repo
 
 # Run a local project
 runit /path/to/project
 runit .
 
 # Run a private repo
-runit https://github.com/org/private-repo --token ghp_xxxxxxxxxxxx
+runit https://github.com/your-org/private-repo --token ghp_xxxxxxxxxxxx
 ```
 
 ### Management Commands
@@ -162,36 +185,36 @@ runit --key-delete MY_API_KEY
 
 ---
 
-## 🛠️ Agent Skills
+## Agent Skills
 
 Runit ships with **17 specialized agent skills** covering all major programming languages. Each skill knows how to detect, install dependencies, and run its project type.
 
-### Core Skills (7)
+### Core Skills
 
 | Skill | Detects | Installs | Runs |
 |-------|---------|----------|------|
-| 🐍 Python | `requirements.txt`, `setup.py`, `pyproject.toml` | `pip install` | `python <entry>` |
-| 🟢 Node.js | `package.json`, `yarn.lock`, `pnpm-lock.yaml` | `npm`/`pnpm`/`yarn install` | `node <entry>` |
-| 🦀 Rust | `Cargo.toml` | `cargo build` | `cargo run` |
-| 🔵 Go | `go.mod`, `go.sum` | `go mod download` | `go run .` |
-| 💎 Ruby | `Gemfile`, `Gemfile.lock` | `bundle install` | `ruby <entry>` |
-| 🦕 Deno | `deno.json`, `deno.jsonc` | — | `deno run` |
-| ☕ Java | `pom.xml`, `build.gradle` | — | `mvn compile` |
+| Python | `requirements.txt`, `setup.py`, `pyproject.toml` | `pip install` | `python <entry>` |
+| Node.js | `package.json`, `yarn.lock`, `pnpm-lock.yaml` | `npm/pnpm/yarn install` | `node <entry>` |
+| Rust | `Cargo.toml` | `cargo build` | `cargo run` |
+| Go | `go.mod`, `go.sum` | `go mod download` | `go run .` |
+| Ruby | `Gemfile`, `Gemfile.lock` | `bundle install` | `ruby <entry>` |
+| Deno | `deno.json`, `deno.jsonc` | — | `deno run` |
+| Java | `pom.xml`, `build.gradle` | — | `mvn compile` |
 
-### Extended Skills (10 — New in v1.1)
+### Extended Skills (v1.1)
 
 | Skill | Detects | Installs | Runs |
 |-------|---------|----------|------|
-| ⚙️ C/C++ | `CMakeLists.txt`, `Makefile`, `configure` | `cmake` / `make` | `make` / `cmake && make` |
-| 🔷 C#/.NET | `*.csproj`, `*.sln` | `dotnet restore` | `dotnet run` |
-| 🐘 PHP | `composer.json`, `artisan` | `composer install` | `php -S localhost:8000` |
-| 🟣 Kotlin | `*.kt`, `build.gradle.kts` | `gradle build` | `gradle run` / `kotlinc` |
-| 🎯 Dart/Flutter | `pubspec.yaml` | `dart pub get` | `dart run` / `flutter run` |
-| 📊 R | `DESCRIPTION`, `*.Rproj` | `renv::restore()` | `Rscript <entry>` |
-| 🔬 Julia | `Project.toml` | `Pkg.instantiate()` | `julia <entry>` |
-| 🌙 Lua | `*.rockspec`, `*.lua` | `luarocks install` | `lua <entry>` |
-| 🔺 Scala | `build.sbt`, `*.scala` | `sbt update` | `sbt run` |
-| 💧 Elixir | `mix.exs` | `mix deps.get` | `mix run` |
+| C/C++ | `CMakeLists.txt`, `Makefile`, `configure` | `cmake / make` | `make / cmake && make` |
+| C#/.NET | `*.csproj`, `*.sln` | `dotnet restore` | `dotnet run` |
+| PHP | `composer.json`, `artisan` | `composer install` | `php -S localhost:8000` |
+| Kotlin | `*.kt`, `build.gradle.kts` | `gradle build` | `gradle run / kotlinc` |
+| Dart/Flutter | `pubspec.yaml` | `dart pub get` | `dart run / flutter run` |
+| R | `DESCRIPTION`, `*.Rproj` | `renv::restore()` | `Rscript <entry>` |
+| Julia | `Project.toml` | `Pkg.instantiate()` | `julia <entry>` |
+| Lua | `*.rockspec`, `*.lua` | `luarocks install` | `lua <entry>` |
+| Scala | `build.sbt`, `*.scala` | `sbt update` | `sbt run` |
+| Elixir | `mix.exs` | `mix deps.get` | `mix run` |
 
 ```bash
 # View all available skills
@@ -200,13 +223,13 @@ runit --skills
 
 ---
 
-## 🐛 Advanced Debugger
+## Advanced Debugger
 
 Built-in debugger that analyzes runtime errors using multiple strategies:
 
 ```mermaid
 graph TD
-    A[Runtime Error] --> B{Debugger Engine}
+    A[Runtime Error] --> B[Debugger Engine]
     B --> C[Error Classification]
     B --> D[Language Detection]
     B --> E[Module Error Extraction]
@@ -217,86 +240,87 @@ graph TD
     E --> H
     F --> H
     G --> H
-    H --> I[Apply Fix & Retry]
+    H --> I[Apply Fix and Retry]
     H --> J[User Help]
 ```
 
 ### Error Types Detected
 
-- 🔑 **Missing API Keys** — detects auth/credential errors
-- 🔌 **Port Conflicts** — finds `EADDRINUSE`, port binding issues
-- 📦 **Missing Modules** — across all 17 languages
-- 🌐 **Network Errors** — `ECONNREFUSED`, timeouts, DNS failures
-- 🛡️ **Permission Errors** — `EACCES`, `EPERM`, `Permission denied`
-- 💾 **Disk/Memory** — `ENOSPC`, `OutOfMemoryError`, heap issues
-- 🔄 **Version Mismatches** — incompatible dependency versions
-- ⚙️ **Config Errors** — missing `.env`, invalid settings
+- **Missing API Keys** — detects auth/credential errors
+- **Port Conflicts** — finds `EADDRINUSE`, port binding issues
+- **Missing Modules** — across all 17 languages
+- **Network Errors** — `ECONNREFUSED`, timeouts, DNS failures
+- **Permission Errors** — `EACCES`, `EPERM`, `Permission denied`
+- **Disk/Memory** — `ENOSPC`, `OutOfMemoryError`, heap issues
+- **Version Mismatches** — incompatible dependency versions
+- **Config Errors** — missing `.env`, invalid settings
 
 The debugger displays a structured report on every error before attempting fixes.
 
 ---
 
-## 🧠 How It Works
+## How It Works
 
 ```
   User input (repo URL / folder path)
-          │
-          ▼
-  ┌─────────────────────────────┐
-  │ 1. Project Loader           │  Clone repo or scan folder
-  │    • GitHub token support   │  Private repo auth
-  └─────────────┬───────────────┘
-                │
-                ▼
-  ┌─────────────────────────────┐
-  │ 2. AI Analysis              │  LLM understands project structure
-  │    • File tree scanning     │  Finds entry points, deps, env vars
-  │    • README fetching        │  Better context without cloning
-  └─────────────┬───────────────┘
-                │
-                ▼
-  ┌─────────────────────────────┐
-  │ 3. Skill Match              │  Load specialized agent skill
-  │    • 17 language skills     │  Type-specific install & run logic
-  └─────────────┬───────────────┘
-                │
-                ▼
-  ┌─────────────────────────────┐
-  │ 4. Install Dependencies     │  Only what's needed
-  │    • pip / npm / cargo...   │  Per-language package manager
-  └─────────────┬───────────────┘
-                │
-                ▼
-  ┌─────────────────────────────┐
-  │ 5. Execute                  │  Run the project
-  └─────────────┬───────────────┘
-                │
-       ┌────────┴────────┐
-       ▼                  ▼
-   ✅ Success          ❌ Error ──► ┌─────────────────────┐
-                                    │ 6. Debugger Engine   │
-       🎉 Done!                     │    • Error classify  │
-                                    │    • Language detect  │
-                                    │    • Module extract   │
-                                    │    • Config check     │
-                                    │    • Web research     │
-                                    └─────────────────────┘
-                                              │
-                                    ┌─────────▼─────────┐
-                                    │ Escalation Chain   │
-                                    │ 1. Auto-fix        │
-                                    │ 2. Ask for keys    │
-                                    │ 3. .env setup      │
-                                    │ 4. Web search      │
-                                    │ 5. User help       │
-                                    └─────────┬─────────┘
-                                              │
-                                              ▼
-                                    ┌─────────────────┐
-                                    │ Retry (loop)     │
-                                    │ until success    │
-                                    │ or user quits    │
-                                    └─────────────────┘
+          |
+          v
+  +-------------------------------+
+  | 1. Project Loader             |  Clone repo or scan folder
+  |    - GitHub token support     |  Private repo auth
+  +---------------+---------------+ 
+                  |
+                  v
+  +-------------------------------+
+  | 2. AI Analysis                |  LLM understands project structure
+  |    - File tree scanning       |  Finds entry points, deps, env vars
+  |    - README fetching          |  Better context without cloning
+  +---------------+---------------+ 
+                  |
+                  v
+  +-------------------------------+
+  | 3. Skill Match                |  Load specialized agent skill
+  |    - 17 language skills       |  Type-specific install and run logic
+  +---------------+---------------+ 
+                  |
+                  v
+  +-------------------------------+
+  | 4. Install Dependencies       |  Only what's needed
+  |    - pip / npm / cargo ...    |  Per-language package manager
+  +---------------+---------------+ 
+                  |
+                  v
+  +-------------------------------+
+  | 5. Execute                    |  Run the project
+  +-------------------------------+
+                  |
+         +--------+--------+
+         |                  |
+         v                  v
+   Success               Error ---> +-----------------------+
+                                    | 6. Debugger Engine    |
+                                    |   - Error classify    |
+                                    |   - Language detect   |
+                                    |   - Module extract    |
+                                    |   - Config check      |
+                                    |   - Web research      |
+                                    +-----------+-----------+
+                                                |
+                                    +-----------v-----------+
+                                    | Escalation Chain       |
+                                    | 1. Auto-fix            |
+                                    | 2. Ask for keys        |
+                                    | 3. .env setup          |
+                                    | 4. Web search          |
+                                    | 5. User help           |
+                                    +-----------+-----------+
+                                                |
+                                                v
+                                    +-----------------------+
+                                    | Retry (loop)          |
+                                    | until success         |
+                                    | or user quits         |
+                                    +-----------------------+
 ```
 
 ### AI Usage Boundaries
@@ -310,7 +334,7 @@ The debugger displays a structured report on every error before attempting fixes
 
 ---
 
-## 🔑 Bring Your Own Key (BYOK)
+## Bring Your Own Key (BYOK)
 
 Runit uses AI only for **analysis** and **error fixing** — not for running your code. You bring your own API key.
 
@@ -318,9 +342,9 @@ Runit uses AI only for **analysis** and **error fixing** — not for running you
 
 | Provider | Default Model | Custom Endpoint |
 |----------|---------------|-----------------|
-| OpenAI | `gpt-4` | ✅ Any OpenAI-compatible API |
-| Anthropic | `claude-3-5-sonnet` | ✅ Any Anthropic-compatible API |
-| Custom | user-defined | ✅ Any endpoint |
+| OpenAI | `gpt-4` | Any OpenAI-compatible API |
+| Anthropic | `claude-3-5-sonnet` | Any Anthropic-compatible API |
+| Custom | user-defined | Any endpoint |
 
 ### Setup
 
@@ -345,18 +369,18 @@ export RUNIT_PROVIDER="custom"
 runit .
 ```
 
-> **No API key?** Runit still works with limited fallback analysis — it just won't use AI for project understanding.
+> No API key? Runit still works with limited fallback analysis — it just won't use AI for project understanding.
 
 ---
 
-## 💡 How-To Guides
+## How-To Guides
 
 ### Run any GitHub repo
 
 ```bash
-runit https://github.com/user/project
-echo y | runit https://github.com/user/project  # Skip disclaimer
-runit https://github.com/user/project --retries 5  # Custom retries
+runit https://github.com/jaypaun007/repo
+echo y | runit https://github.com/jaypaun007/repo
+runit https://github.com/jaypaun007/repo --retries 5
 ```
 
 ### Provide custom instructions
@@ -364,22 +388,23 @@ runit https://github.com/user/project --retries 5  # Custom retries
 ```
 $ runit .
   ...
-  💬 Any special instructions for how to run this project?
+  [2/6] Optional: Add custom instructions
+  Any special instructions for how to run this project?
      (e.g. 'use python3 instead of python', 'set --port 9000')
-     ⏳ Press Enter to skip
+     Press Enter to skip
   Instructions: use python3.11 instead of python3
-  ✓ Noted
+  Noted
 ```
 
 ### Handle missing API keys
 
 ```
-  🔑 This project requires 2 environment variable(s)
-    🔑 OPENAI_API_KEY
-    🔑 DATABASE_URL
+  This project requires 2 environment variable(s)
+    OPENAI_API_KEY
+    DATABASE_URL
   Set these now? [Y/n]: y
-  Enter value for OPENAI_API_KEY: [hidden]
-  ✓ OPENAI_API_KEY set
+  Enter value for OPENAI_API_KEY:
+  OPENAI_API_KEY set
 ```
 
 Keys are stored securely in `~/.runit/keys.json` for reuse.
@@ -388,14 +413,14 @@ Keys are stored securely in `~/.runit/keys.json` for reuse.
 
 ```bash
 # Auto-detect
-runit https://github.com/user/project
+runit https://github.com/jaypaun007/repo
 
 # Force mode
-runit https://github.com/user/project --docker
-runit https://github.com/user/project --dev
+runit https://github.com/jaypaun007/repo --docker
+runit https://github.com/jaypaun007/repo --dev
 ```
 
-Auto-detects: exposed ports from `Dockerfile`, port mappings from `docker-compose.yml`, Docker images from README.
+Auto-detects exposed ports from `Dockerfile`, port mappings from `docker-compose.yml`, and Docker images from README.
 
 ### Run a private repository
 
@@ -410,7 +435,7 @@ runit https://github.com/org/private-repo
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Config file: `~/.runit/config.json`
 
@@ -432,15 +457,15 @@ Configure via:
 
 ---
 
-## 🏛️ Architecture
+## Architecture
 
 ```
 runit/
 ├── runit/
 │   ├── __init__.py         # Package metadata (v1.1.0)
-│   ├── main.py             # CLI orchestration & entry point
+│   ├── main.py             # CLI orchestration and entry point
 │   ├── cli.py              # Terminal UI (rich + fallback)
-│   ├── config.py           # Configuration & key management
+│   ├── config.py           # Configuration and key management
 │   ├── byok.py             # BYOK setup wizard
 │   ├── llm.py              # AI client (OpenAI, Anthropic, custom)
 │   ├── environment.py      # Kaggle/Colab detection, platform info
@@ -465,12 +490,12 @@ runit/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-**Contributions are welcome and appreciated!** Here's how to help:
+**Contributions are welcome and appreciated!**
 
 ```bash
-# Fork → clone → install
+# Fork, then:
 git clone https://github.com/your-username/runit.git
 cd runit
 pip install -e ".[dev]"
@@ -479,12 +504,12 @@ python -m pytest tests/
 
 ### Ways to contribute
 
-- 🐛 **Report bugs** — [Open an issue](https://github.com/jaypaun007/runit/issues)
-- 💡 **Suggest features** — [Start a discussion](https://github.com/jaypaun007/runit/discussions)
-- 🔧 **Submit PRs** — Fix bugs, add skills, improve the debugger
-- 📖 **Improve docs** — Better examples, clearer guides
-- 🌍 **Add a skill** — Support a new language
-- 🧪 **Write tests** — Help reach higher coverage
+- **Report bugs** — Open an [issue](https://github.com/jaypaun007/runit/issues)
+- **Suggest features** — Start a [discussion](https://github.com/jaypaun007/runit/discussions)
+- **Submit PRs** — Fix bugs, add skills, improve the debugger
+- **Improve docs** — Better examples, clearer guides
+- **Add a skill** — Support a new language
+- **Write tests** — Help reach higher coverage
 
 ### Roadmap
 
@@ -492,7 +517,7 @@ python -m pytest tests/
 - [x] 10 new language skills
 - [x] Advanced debugger
 - [x] Docker mode with port detection
-- [x] Web research & error search
+- [x] Web research and error search
 - [x] BYOK — any AI provider
 - [ ] GitHub Actions CI/CD
 - [ ] PyPI publishing
@@ -502,18 +527,18 @@ python -m pytest tests/
 
 ---
 
-## 🛡️ Safety
+## Safety
 
 | Rule | Description |
 |------|-------------|
-| 🔒 Never deletes code | Only installs dependencies |
-| 🔒 Never runs destructive commands | Safe execution only |
-| 🔒 Asks before modifying files | User always in control |
-| 🔒 Educational use only | See disclaimer |
+| Never deletes code | Only installs dependencies |
+| Never runs destructive commands | Safe execution only |
+| Asks before modifying files | User always in control |
+| Educational use only | See disclaimer |
 
 ---
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 Runit is provided for **educational and research purposes only**. By using this tool, you acknowledge:
 
@@ -525,31 +550,18 @@ Runit is provided for **educational and research purposes only**. By using this 
 
 ---
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
-<div align="center">
+*Made with by [Jay Paun](https://github.com/jaypaun007)*
 
-**Made with ❤️ by [Jay Paun](https://github.com/jaypaun007)**
+[Home](https://github.com/jaypaun007/runit) |
+[Report Bug](https://github.com/jaypaun007/runit/issues) |
+[Feature Request](https://github.com/jaypaun007/runit/discussions) |
+[Submit PR](https://github.com/jaypaun007/runit/pulls) |
+[Star](https://github.com/jaypaun007/runit/stargazers)
 
-[🏠 Home](https://github.com/jaypaun007/runit) •
-[🐛 Report Bug](https://github.com/jaypaun007/runit/issues) •
-[💡 Feature Request](https://github.com/jaypaun007/runit/discussions) •
-[🔧 Submit PR](https://github.com/jaypaun007/runit/pulls) •
-[⭐ Star](https://github.com/jaypaun007/runit/stargazers)
-
-*Built with Python • Powered by AI • Driven by community*
-
-<a href="https://star-history.com/#jaypaun007/runit&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jaypaun007/runit&type=Date&theme=dark" />
-    <img src="https://api.star-history.com/svg?repos=jaypaun007/runit&type=Date" alt="Star History" width="600" />
-  </picture>
-</a>
-
-**If you find this useful, please ⭐ star the repo!**
-
-</div>
+*Built with Python. Powered by AI. Driven by community.*
