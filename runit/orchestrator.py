@@ -76,7 +76,15 @@ class Pipeline:
         result = self._run_project()
 
         if result.get("ok"):
-            public_url = self._start_cloudflare_tunnel(result.get("port"))
+            port = result.get("port")
+            pid = result.get("pid")
+            if not port and pid:
+                print(f"  \U0001f50d  Scanning for port...")
+                port = self._detect_port_from_process(pid)
+                if port:
+                    result["port"] = port
+                    result["url"] = f"http://localhost:{port}"
+            public_url = self._start_cloudflare_tunnel(port or result.get("port"))
             if public_url:
                 result["public_url"] = public_url
             self._dashboard(result)
@@ -85,7 +93,14 @@ class Pipeline:
         print("  \u274c  Automatic setup failed. Trying AI agent...")
         agent_result = self._agent_repair(result.get("error", ""))
         if agent_result.get("ok"):
-            public_url = self._start_cloudflare_tunnel(agent_result.get("port"))
+            port = agent_result.get("port")
+            pid = agent_result.get("pid")
+            if not port and pid:
+                port = self._detect_port_from_process(pid)
+                if port:
+                    agent_result["port"] = port
+                    agent_result["url"] = f"http://localhost:{port}"
+            public_url = self._start_cloudflare_tunnel(port)
             if public_url:
                 agent_result["public_url"] = public_url
             self._dashboard(agent_result)
@@ -451,6 +466,7 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
   <p>Review and fill the <strong>{len(var_names)}</strong> required variables, then click Save.</p>
   <form method="POST" action="/">{"".join(rows)}
     <button type="submit">Save &amp; Continue</button>
+    <button type="submit" name="_skip" value="1" style="background:#334155;margin-top:.5rem">Skip — use defaults</button>
   </form>
   <div class="small">Values already have random defaults — edit or leave as-is.</div>
 </div>
@@ -481,15 +497,22 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
                 length = int(self_.headers.get("Content-Length", 0))
                 body = self_.rfile.read(length).decode()
                 parsed = urllib.parse.parse_qs(body)
-                for var in var_names:
-                    vals = parsed.get(var, [])
-                    if vals and vals[0].strip():
-                        submitted[var] = vals[0].strip()
-                result_file.write_text(json.dumps(submitted))
+                if "_skip" in parsed:
+                    submitted["_skip"] = True
+                    result_file.write_text(json.dumps({"__skip__": True}))
+                else:
+                    for var in var_names:
+                        vals = parsed.get(var, [])
+                        if vals and vals[0].strip():
+                            submitted[var] = vals[0].strip()
+                    result_file.write_text(json.dumps(submitted))
                 self_.send_response(200)
                 self_.send_header("Content-Type", "text/html; charset=utf-8")
                 self_.end_headers()
-                self_.wfile.write(b"<h2>Saved!</h2><script>window.close()</script>")
+                if "_skip" in parsed:
+                    self_.wfile.write(b"<h2>Skipped - using defaults.</h2><script>window.close()</script>")
+                else:
+                    self_.wfile.write(b"<h2>Saved!</h2><script>window.close()</script>")
 
             def log_message(self_, *a):
                 pass
@@ -502,21 +525,57 @@ Env vars set: {list(self.env_vars.keys())[:20]}"""
         public_url = self._start_cloudflare_tunnel(port)
         if public_url:
             print(f"    \U0001f310  Open: {public_url}")
-            print(f"    \u23f3  Waiting for submission (timeout: 120s)...")
+            print(f"    \u23f3  Fill the form in your browser, then click Save (or Skip to use defaults)")
         else:
             print(f"    \U0001f5a5  Local: http://localhost:{port}")
 
-        for _ in range(120):
+        poll = 0
+        while True:
             if result_file.exists():
                 try:
-                    submitted = json.loads(result_file.read_text())
+                    data = json.loads(result_file.read_text())
+                    if "__skip__" in data:
+                        submitted = {}
+                    else:
+                        submitted = data
                     break
                 except Exception:
                     pass
+            poll += 1
+            if poll % 60 == 0:
+                print(f"    \u23f3  Still waiting... ({poll}s)")
             time.sleep(1)
 
         server.shutdown()
         return submitted
+
+    def _detect_port_from_process(self, pid):
+        for _ in range(30):
+            try:
+                r = subprocess.run(
+                    ["ss", "-tlnp"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                for line in r.stdout.splitlines():
+                    if str(pid) in line:
+                        m = re.search(r":(\d+)", line)
+                        if m:
+                            return int(m.group(1))
+            except Exception:
+                pass
+            try:
+                with open(f"/proc/{pid}/net/tcp") as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) > 1 and parts[1] != "local_address":
+                            hex_port = parts[1].split(":")[1]
+                            port = int(hex_port, 16)
+                            if 1024 <= port <= 65535:
+                                return port
+            except Exception:
+                pass
+            time.sleep(1)
+        return None
 
     def _start_cloudflare_tunnel(self, port):
         if not port:
