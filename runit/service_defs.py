@@ -7,7 +7,7 @@ SERVICE_DEFS = {
         "start_cmd": "pg_ctlcluster {version} main start 2>/dev/null || service postgresql start",
         "stop_cmd": "pg_ctlcluster {version} main stop 2>/dev/null || service postgresql stop",
         "configure_cmds": [
-            'V=$(pg_lsclusters -h 2>/dev/null | head -1 | awk \'{print $1}\'); '
+            'V=$(pg_lsclusters 2>/dev/null | grep -v "^Ver" | head -1 | awk \'{print $1}\'); '
             'if [ -n "$V" ]; then '
             'HBA="/etc/postgresql/$V/main/pg_hba.conf"; '
             'echo "local all all trust" > "$HBA"; '
