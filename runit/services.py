@@ -276,12 +276,27 @@ def start_service(service_key: str) -> tuple[bool, str]:
     return False, f"Could not start {svc['name']} (try installing Docker or running it manually)"
 
 
-def start_required_services(project_path: str, plan: dict | None = None) -> list[dict]:
+def start_required_services(project_path: str, plan: dict | None = None,
+                             env_type: str = "local") -> list[dict]:
     c = _console()
     required = detect_required_services(project_path, plan)
     results = []
 
     if not required:
+        return results
+
+    is_cloud = env_type in ("kaggle", "colab")
+
+    if is_cloud:
+        if c:
+            c.print(f"\n  [bold cyan]\U0001f6e0  Required services detected: {', '.join(required)}[/]")
+            c.print(f"  [yellow]  Cloud environment detected — services need to be configured via env vars[/]")
+            c.print(f"  [yellow]  Set DATABASE_URL, REDIS_URL, etc. manually or use --instructions[/]")
+        for svc_key in required:
+            results.append({"service": svc_key, "ok": False,
+                            "message": f"{SERVICES[svc_key]['name']} — set env var in cloud (Docker unavailable)"})
+            if c:
+                c.print(f"  \u26a0\ufe0f  {SERVICES[svc_key]['name']}: set env var manually")
         return results
 
     if c:

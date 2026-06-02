@@ -217,17 +217,38 @@ Step {steps_taken}/{max_steps}. What should I do next?
 Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{}}, "done": bool}}"""
 
         try:
-            response = llm_call(prompt, system=system)
-            response = response.strip()
-            if response.startswith("```"):
-                response = response.split("\n", 1)[1]
+            raw_response = llm_call(prompt, system=system)
+            response = raw_response.strip()
+            if not response:
+                if c:
+                    cprint(f"  [yellow]Agent: API returned empty response[/]")
+                break
+            if response.startswith("{"):
+                pass
+            elif response.startswith("```"):
+                response = response.split("\n", 1)[1] if "\n" in response else response[3:]
                 response = response.rsplit("\n", 1)[0] if response.endswith("```") else response
                 response = response.rsplit("```", 1)[0] if "```" in response else response
+            else:
+                if c:
+                    cprint(f"  [yellow]Agent: unexpected response format, retrying...[/]")
+                    continue
+
+            if response.strip().startswith('{"error"'):
+                err = json.loads(response)
+                if c:
+                    cprint(f"  [yellow]Agent API error: {err.get('error','unknown')}[/]")
+                    cprint(f"  [yellow]Hint: {err.get('hint','')}[/]")
+                break
 
             action = json.loads(response)
+        except json.JSONDecodeError as e:
+            if c:
+                cprint(f"  [yellow]Agent: API returned invalid JSON — check your API key and endpoint[/]")
+            break
         except Exception as e:
             if c:
-                cprint(f"  [yellow]Agent parse error: {e}[/]")
+                cprint(f"  [yellow]Agent: error — {e}[/]")
             break
 
         thought = action.get("thought", "")

@@ -28,12 +28,20 @@ from runit.cli import AUTO_YES as CLI_AUTO_YES
 
 
 _CRITICAL_ENV_PATTERNS = [
-    "api_key", "secret", "password", "token", "auth",
-    "database_url", "postgres", "redis", "mongodb",
-    "openai", "anthropic", "aws_access", "aws_secret",
-    "jwt_secret", "encryption_key", "cookie_secret",
-    "slack_token", "discord_token", "github_token",
-    "host", "port", "node_env",
+    "api_key", "api_secret",
+    "password", "secret_key",
+    "private_key", "auth_token",
+    "jwt_secret", "encryption_key",
+    "webhook_secret", "cookie_secret",
+    "stripe_secret", "stripe_webhook",
+    "aws_secret_access_key",
+    "openai_api_key", "anthropic_api_key",
+    "github_token", "github_client_secret",
+    "slack_token", "discord_token",
+    "google_client_secret",
+    "resend_api_key",
+    "llmgateway_api_key",
+    "gateway_api_key",
 ]
 
 
@@ -225,7 +233,8 @@ def _choose_run_mode(plan: dict, project_path: str) -> bool:
 
 def cmd_run(target: str, token: str | None = None, max_retries: int | None = None,
             force_docker: bool = False, force_dev: bool = False, yes: bool = False,
-            plain: bool = False, instructions: str | None = None):
+            plain: bool = False, instructions: str | None = None,
+            generate_env: bool = False):
     cfg = load_config()
     max_retries = max_retries or cfg.get("max_retries", DEFAULT_MAX_RETRIES)
 
@@ -278,6 +287,33 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     project_name = get_project_name(project_path)
     print(f"  \U0001f4c1 Loaded: {project_name} ({project_path})")
 
+    if generate_env:
+        env_example = Path(project_path) / ".env.example"
+        env_file = Path(project_path) / ".env"
+        if env_example.exists():
+            c = cli_mod._console()
+            if c:
+                c.print(f"  [cyan]Generating .env from .env.example with random values...[/]")
+            lines = []
+            import random
+            import string
+            for line in env_example.read_text().splitlines():
+                if line.strip() and not line.strip().startswith("#") and "=" in line:
+                    key = line.split("=", 1)[0].strip()
+                    default_val = line.split("=", 1)[1].strip().strip("\"'") if "=" in line else ""
+                    if not default_val or default_val == key.lower():
+                        val = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+                        lines.append(f"{key}={val}")
+                    else:
+                        lines.append(f"{key}={default_val}")
+                else:
+                    lines.append(line)
+            env_file.write_text("\n".join(lines))
+            print(f"  \u2705 Generated .env with {sum(1 for l in lines if '=' in l)} entries")
+            plan["_env_source"] = "auto_generated"
+        else:
+            print("  \u26a0\ufe0f  No .env.example found to generate from")
+
     print_step(2, 8, "Analyzing project structure...")
     plan = analyze_project(project_path, repo_url=repo_url)
     if not no_api_key:
@@ -287,7 +323,7 @@ def cmd_run(target: str, token: str | None = None, max_retries: int | None = Non
     print_plan(plan)
 
     print_step(3, 8, "Detecting required services...")
-    service_results = start_required_services(project_path, plan)
+    service_results = start_required_services(project_path, plan, env_type=env_type)
     plan["_services_started"] = service_results
 
     skill = get_skill(plan.get("type", ""))
@@ -678,6 +714,8 @@ def main():
                         help="Disable rich/colored output (auto-enabled in notebooks)")
     parser.add_argument("--instructions", type=str, default=None,
                         help="Custom run instructions (e.g. 'use python3.11', for Kaggle/Colab)")
+    parser.add_argument("--generate-env", action="store_true",
+                        help="Generate .env from .env.example with random/placeholder values")
     parser.add_argument("--version", action="store_true", help="Show version")
 
     subcommands = parser.add_argument_group("commands")
@@ -718,7 +756,8 @@ def main():
         return cmd_run(args.target, token=args.token, max_retries=args.retries,
                        force_docker=args.docker, force_dev=args.dev,
                        yes=args.yes, plain=args.plain,
-                       instructions=args.instructions)
+                       instructions=args.instructions,
+                       generate_env=args.generate_env)
 
     parser.print_help()
     return 1
