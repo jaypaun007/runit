@@ -16,7 +16,7 @@ CHECK="\xE2\x9C\x85"
 
 echo ""
 echo -e "${BOLD}${CYAN}  ╔══════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}  ║       ⚡ Runit Installer             ║${NC}"
+echo -e "${BOLD}${CYAN}  ║       ⚡ Runit Installer              ║${NC}"
 echo -e "${BOLD}${CYAN}  ║  AI-Powered Repo Execution Agent     ║${NC}"
 echo -e "${BOLD}${CYAN}  ╚══════════════════════════════════════╝${NC}"
 echo ""
