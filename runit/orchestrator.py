@@ -92,6 +92,20 @@ class Pipeline:
         if req_txt.exists():
             self.project_type = "python"
             print(f"  \U0001f4e6  Python project detected")
+            content = req_txt.read_text().lower()
+            req_svc_map = {
+                "psycopg2": "postgresql", "asyncpg": "postgresql",
+                "redis": "redis", "aioredis": "redis",
+                "mysqlclient": "mysql", "pymysql": "mysql",
+                "pymongo": "mongodb", "motor": "mongodb",
+                "elasticsearch": "elasticsearch",
+                "clickhouse": "clickhouse",
+                "neo4j": "neo4j",
+            }
+            for pkg, svc in req_svc_map.items():
+                if pkg in content and svc not in self.required_services:
+                    self.required_services.append(svc)
+                    print(f"  \U0001f6e0  Service detected from requirements: {svc}")
 
         env_example = root / ".env.example"
         if env_example.exists():
@@ -328,6 +342,10 @@ class Pipeline:
         env_type = detect_env()
         kwd = kaggle_working_dir()
 
+        services_needed = list(self.sm.running.keys())
+        if not services_needed:
+            services_needed = self.required_services
+
         agent = AgentCore(
             self.project_path, console=self.c, auto_yes=self.auto_yes,
             max_steps=self.max_retries,
@@ -339,11 +357,14 @@ Type: {self.project_type} | PM: {self.package_manager}
 Environment: {env_type}
 Working dir: {kwd or self.project_path}
 Services: {json.dumps(services_info)}
+Services needed (detected): {json.dumps(services_needed)}
 Env vars: {json.dumps(env)[:1000]}
 Key files: {json.dumps(project_files)[:3000]}
 
 Run this project.
 - Key files are above — do NOT re-read them
+- If services are needed but not running, install them with install_service()
+- Check requirements.txt / imports for database deps (psycopg2, asyncpg, redis, etc)
 - {suggested_cmd or "Find and run the start command"}
 - Show all commands you run
 - Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}}) when serving"""

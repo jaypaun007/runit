@@ -24,7 +24,7 @@ SERVICE_DEFS = {
         "health_cmd": ["sh", "-c", "PGPASSWORD=app psql -h localhost -U app -d app -c 'SELECT 1' 2>/dev/null"],
         "port": 5432,
         "connection_url": "postgresql://app:app@{host}:{port}/app",
-        "env_vars": ["DATABASE_URL", "POSTGRES_URL", "PGHOST", "PGPORT"],
+        "env_vars": ["DATABASE_URL", "POSTGRES_URL", "PGHOST", "PGPORT", "DB_HOST", "DB_NAME", "DB_USER"],
     },
     "redis": {
         "name": "Redis",
