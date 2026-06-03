@@ -455,6 +455,11 @@ class Pipeline:
                 timeout=300,
             )
             if r.get("ok"):
+                self._run_cmd(
+                    "pip install -q 'pydantic>=1.9.0,<2' 2>/dev/null"
+                    " || pip install -q --break-system-packages 'pydantic>=1.9.0,<2'",
+                    timeout=120,
+                )
                 return True
             print(f"  \u26a0\ufe0f  Batch install failed — trying import-based install...")
 
@@ -465,6 +470,11 @@ class Pipeline:
         print(f"  \U0001f50d  Installing {len(imports)} detected packages...")
         r = self._run_cmd(f"pip install -q --no-build-isolation {' '.join(imports)}", timeout=300)
         if r.get("ok"):
+            self._run_cmd(
+                "pip install -q 'pydantic>=1.9.0,<2' 2>/dev/null"
+                " || pip install -q --break-system-packages 'pydantic>=1.9.0,<2'",
+                timeout=120,
+            )
             return True
 
         print(f"  \u26a0\ufe0f  Group install failed — trying individually...")
@@ -473,19 +483,12 @@ class Pipeline:
         return True
 
     def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
-        install_success = self._install_deps(files)
+        self._install_deps(files)
 
         run_cmd = suggested_cmd or self._detect_run_cmd(files)
         if run_cmd:
             print(f"  \U000025b6  Starting project...")
             result = self._run_project_in_background(run_cmd)
-            if not result.get("ok"):
-                log = result.get("log", "")
-                if log:
-                    print(f"    \U0001f4cb  {log[:500]}")
-                if install_success:
-                    result["error"] = "Process exited or no port detected"
-                return result
             return result
 
         return {"ok": False, "error": "No run command detected"}
@@ -671,10 +674,10 @@ Suggested cmd: {suggested_cmd}
 Diagnose the problem. Return ONLY JSON:
 {{"action":"install"|"run"|"apt"|"done","param":"...","reason":"..."}}
 
-- "install": pip install package(s). param = "pkg1 pkg2"
+- "install": pip install package(s). USE == NOT < > (shell-safe). param = "pkg1 pkg2==version"
 - "apt": apt-get install. param = "pkg1 pkg2"  
 - "run": try this run command. param = full command
-- "done": mark as fixed. param = ""
+- "done": mark as fixed, try running again. param = ""
 
 JSON only, no markdown:"""
             try:
@@ -695,7 +698,8 @@ JSON only, no markdown:"""
                     continue
 
                 if action == "install":
-                    self._run_cmd(f"pip install -q --no-build-isolation {param}", timeout=300)
+                    safe_param = param.replace("<", "=").replace(">", "=").replace("|", " ").replace("&", " ")
+                    self._run_cmd(f"pip install -q --no-build-isolation '{safe_param}'", timeout=300)
                     result = self._run_project_in_background(suggested_cmd)
                     if result.get("ok"):
                         return result
