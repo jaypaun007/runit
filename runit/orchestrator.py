@@ -330,7 +330,10 @@ class Pipeline:
             return result
 
         if api_key:
-            result = self._ai_fix_run(result.get("error", ""), project_files, suggested_cmd)
+            err = result.get("error", "")
+            log = result.get("log", "")
+            combined = f"{err}\n{log}"[:2000]
+            result = self._ai_fix_run(combined, project_files, suggested_cmd)
             if result.get("ok"):
                 self._generate_restart_script(result, suggested_cmd)
                 return result
@@ -363,7 +366,6 @@ class Pipeline:
 
     def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
         install_cmd = self._detect_install_cmd(files)
-        install_ok = True
 
         if install_cmd:
             print(f"  \U0001f4e6  Installing dependencies...")
@@ -372,15 +374,18 @@ class Pipeline:
                 print(f"  \u26a0\ufe0f  pip failed — trying to fix...")
                 r = self._fix_and_install(files)
                 if not r.get("ok"):
-                    print(f"  \u26a0\ufe0f  Some deps may be missing, continuing anyway...")
-                    install_ok = False
+                    print(f"  \u26a0\ufe0f  Batch install failed — trying key packages...")
+                    self._install_key_packages(files)
 
         run_cmd = suggested_cmd or self._detect_run_cmd(files)
         if run_cmd:
             print(f"  \U000025b6  Starting project...")
             result = self._run_project_in_background(run_cmd)
-            if not result.get("ok") and install_ok:
-                return self._ai_fix_run(result.get("error", ""), files, run_cmd)
+            if not result.get("ok"):
+                log = result.get("log", "")
+                if log:
+                    print(f"    \U0001f4cb  {log[:500]}")
+                return self._ai_fix_run(result.get("error", "") + "\n" + log, files, run_cmd)
             return result
 
         return {"ok": False, "error": "No run command detected"}
@@ -395,14 +400,28 @@ class Pipeline:
         good_pkgs = []
         for line in lines:
             pkg = re.split(r'[=<>~!]', line)[0].strip()
-            if pkg.lower() in ("install",):
+            if pkg.lower() in ("install", "setup", "test", "nose"):
                 bad_pkgs.append(line)
             else:
                 good_pkgs.append(line)
         if bad_pkgs:
-            print(f"    \u26a0\ufe0f  Skipping bad packages: {', '.join(bad_pkgs)}")
+            print(f"    \u26a0\ufe0f  Skipping suspicious packages: {', '.join(bad_pkgs)}")
             req_path.write_text("\n".join(good_pkgs) + "\n")
         return self._run_cmd("pip install -r requirements.txt -q", timeout=300)
+
+    def _install_key_packages(self, files: dict):
+        py_pkgs = ["fastapi", "uvicorn", "sqlalchemy", "psycopg2-binary",
+                    "flask", "django", "redis", "pymongo", "requests",
+                    "python-dotenv", "alembic", "pydantic"]
+        needed = []
+        if "requirements.txt" in files:
+            content = files["requirements.txt"].lower()
+            for pkg in py_pkgs:
+                if pkg in content:
+                    needed.append(pkg)
+        if not needed:
+            needed = ["fastapi", "uvicorn"]
+        self._run_cmd(f"pip install -q {' '.join(needed)}", timeout=300)
 
     def _detect_run_cmd(self, files: dict) -> str | None:
         for f in ["app/main.py", "main.py", "app.py", "manage.py"]:
@@ -436,6 +455,10 @@ class Pipeline:
 
     def _run_project_in_background(self, cmd: str) -> dict:
         self._print_cmd(cmd)
+        port = self._detect_port_from_cmd(cmd)
+        if port:
+            self._kill_port(port)
+
         env = os.environ.copy()
         env.update(self.env_vars)
         log_dir = Path(self.project_path) / ".runit"
@@ -452,13 +475,12 @@ class Pipeline:
                 )
             self.pm.add_process("app", proc)
 
-            port = self._detect_port_from_cmd(cmd)
             time.sleep(2)
 
-            for _ in range(15):
+            for _ in range(20):
                 if proc.poll() is not None:
-                    log = self._read_last_log(log_path, 20)
-                    return {"ok": False, "error": f"Process exited: {log}"}
+                    log = self._read_last_log(log_path, 30)
+                    return {"ok": False, "error": "Process exited", "log": log}
                 if port and self._port_open(port):
                     print(f"    \u2705  Running on port {port}")
                     return {"ok": True, "pid": proc.pid, "port": port,
@@ -467,18 +489,29 @@ class Pipeline:
 
             if not port:
                 port = self._scan_for_port(proc.pid)
-                if port:
-                    print(f"    \u2705  Running on port {port}")
-                    return {"ok": True, "pid": proc.pid, "port": port,
-                            "url": f"http://localhost:{port}", "logfile": log_path}
 
-            log = self._read_last_log(log_path, 10)
-            return {"ok": True, "pid": proc.pid, "port": port or 0,
-                    "url": f"http://localhost:{port}" if port else "",
-                    "logfile": log_path, "log": log}
+            if port:
+                print(f"    \u2705  Running on port {port}")
+                return {"ok": True, "pid": proc.pid, "port": port,
+                        "url": f"http://localhost:{port}", "logfile": log_path}
+
+            log = self._read_last_log(log_path, 20)
+            return {"ok": False, "error": "No port detected after 20s", "log": log}
 
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def _kill_port(self, port: int):
+        try:
+            r = subprocess.run(["fuser", "-k", f"{port}/tcp"],
+                               capture_output=True, timeout=5)
+        except Exception:
+            try:
+                r = subprocess.run(
+                    f"lsof -ti:{port} | xargs kill -9 2>/dev/null || true",
+                    shell=True, capture_output=True, timeout=5)
+            except Exception:
+                pass
 
     def _detect_port_from_cmd(self, cmd: str) -> int | None:
         m = re.search(r"--port\s+(\d+)", cmd)
