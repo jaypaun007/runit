@@ -491,16 +491,19 @@ class Pipeline:
         return {"ok": False, "error": "No run command detected"}
 
     def _detect_run_cmd(self, files: dict) -> str | None:
-        for f in ["app/main.py", "main.py", "app.py", "manage.py"]:
-            if f in files:
-                content = files[f]
-                if "FastAPI" in content or "fastapi" in content.lower():
-                    prefix = f.rsplit(".", 1)[0].replace("/", ".")
-                    return f"uvicorn {prefix}:app --host 0.0.0.0 --port 8000"
-                if "flask" in content.lower():
-                    return f"python {f}"
-                if "django" in content.lower() or "manage.py" == f:
-                    return f"python {f} runserver 0.0.0.0:8000"
+        app_main = files.get("app/main.py", "")
+        if "FastAPI" in app_main or "fastapi" in app_main.lower():
+            return "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+        main_py = files.get("main.py", "")
+        if "FastAPI" in main_py or "fastapi" in main_py.lower():
+            return "uvicorn main:app --host 0.0.0.0 --port 8000"
+        app_py = files.get("app.py", "")
+        if "FastAPI" in app_py or "fastapi" in app_py.lower():
+            return "uvicorn app:app --host 0.0.0.0 --port 8000"
+        for f, content in files.items():
+            if f in ("manage.py",):
+                return f"python {f} runserver 0.0.0.0:8000"
+            if ".py" in f and "flask" in content.lower():
                 return f"python {f}"
         return None
 
@@ -760,6 +763,29 @@ JSON only, no markdown:"""
         return files
 
     def _suggest_run_command(self, files):
+        app_main = files.get("app/main.py", "")
+        main_py = files.get("main.py", "")
+        app_py = files.get("app.py", "")
+        reqs = files.get("requirements.txt", "")
+
+        if "app/main.py" in files:
+            if "FastAPI" in app_main or "fastapi" in app_main.lower():
+                return "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+            if "flask" in app_main.lower():
+                return "uvicorn app.main:app --host 0.0.0.0 --port 8000" if "app=Flask" in app_main else "python app/main.py"
+
+        if "app.py" in files:
+            if "FastAPI" in app_py or "fastapi" in app_py.lower():
+                return "uvicorn app:app --host 0.0.0.0 --port 8000"
+            if "flask" in app_py.lower():
+                return "python app.py"
+
+        if "main.py" in files:
+            if "FastAPI" in main_py or "fastapi" in main_py.lower():
+                return "uvicorn main:app --host 0.0.0.0 --port 8000"
+            if "flask" in main_py.lower():
+                return "python main.py"
+
         for name, content in files.items():
             if name == "Procfile":
                 m = re.search(r"web:\s*(.+)", content)
@@ -778,26 +804,18 @@ JSON only, no markdown:"""
                     pass
             if name == "requirements.txt":
                 if "uvicorn" in content.lower() and "fastapi" in content.lower():
-                    return "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+                    if "app/main.py" in files:
+                        return "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+                    if "main.py" in files or "app.py" in files:
+                        continue
+                    return "uvicorn main:app --host 0.0.0.0 --port 8000"
                 if "uvicorn" in content.lower():
                     return "uvicorn main:app --host 0.0.0.0 --port 8000"
                 if "flask" in content.lower():
-                    return "python app.py  (Flask app, try app.py or main.py)"
+                    return "python app.py"
                 if "django" in content.lower():
                     return "python manage.py runserver 0.0.0.0:8000"
-            if name in ("app/main.py", "main.py", "app.py"):
-                if "FastAPI" in content or "fastapi" in content.lower():
-                    app_var = "app"
-                    for line in content.splitlines():
-                        m = re.match(r"app\s*=\s*FastAPI", line)
-                        if m:
-                            app_var = "app"
-                            break
-                    prefix = name.rsplit(".", 1)[0].replace("/", ".")
-                    return f"uvicorn {prefix}:{app_var} --host 0.0.0.0 --port 8000"
-                if "flask" in content.lower():
-                    prefix = name.rsplit(".", 1)[0].replace("/", ".")
-                    return f"python -m {prefix}"
+
         return ""
 
     def _tunnel_all_ports(self, result):
