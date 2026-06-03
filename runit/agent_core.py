@@ -35,7 +35,7 @@ class AgentCore:
 Last: {self.last_result or 'start'}
 Error: {self.error_history[-1] if self.error_history else 'none'}
 
-Step {self.steps_taken}/{self.max_steps}. Next action?
+Step {self.steps_taken}/{self.max_steps}. Next tool?
 JSON: {{"thought":"...","action":"tool","args":{{}},"done":false}}"""
 
             try:
@@ -70,7 +70,7 @@ JSON: {{"thought":"...","action":"tool","args":{{}},"done":false}}"""
                 self.last_tool = tool
 
                 if self.c:
-                    self.cprint(f"  [dim]> {thought}[/]")
+                    self.cprint(f"  > {thought}")
 
                 if tool == "ask_user":
                     if self.auto_yes:

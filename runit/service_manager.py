@@ -56,7 +56,8 @@ class ServiceManager:
             if shutil.which("apt-get"):
                 result = self._start_via_apt(name, defs, port)
                 if result["ok"]:
-                    self.running[name] = {"port": port, "defs": defs, "mode": "apt"}
+                    version = result.get("version", "16")
+                    self.running[name] = {"port": port, "defs": defs, "mode": "apt", "version": version}
                     result["url"] = self._make_url(defs, host, port)
                     return result
 
@@ -115,7 +116,8 @@ class ServiceManager:
 
         time.sleep(1)
 
-        start_cmd = defs["start_cmd"].format(version="16", port=port)
+        version = self._detect_pg_version() if name == "postgresql" else "16"
+        start_cmd = defs["start_cmd"].format(version=version, port=port)
         try:
             subprocess.run(start_cmd, shell=True, capture_output=True, text=True, timeout=30)
         except Exception:
@@ -131,7 +133,7 @@ class ServiceManager:
 
         for _ in range(10):
             if self._check_alive_port(defs, port):
-                return {"ok": True, "message": f"{defs['name']} installed via apt on port {port}"}
+                return {"ok": True, "version": version, "message": f"{defs['name']} installed via apt on port {port}"}
             time.sleep(1)
 
         return {"ok": False, "error": f"apt-get {defs['name']} installed but not running"}
@@ -225,7 +227,8 @@ class ServiceManager:
 
         elif entry.get("mode") == "apt":
             defs = entry["defs"]
-            stop_cmd = defs.get("stop_cmd", "").format(port=entry.get("port", defs["port"]))
+            version = entry.get("version", "16")
+            stop_cmd = defs.get("stop_cmd", "").format(version=version, port=entry.get("port", defs["port"]))
             if stop_cmd:
                 subprocess.run(stop_cmd, shell=True, capture_output=True, timeout=15)
             proc = subprocess.run(["pkill", "-f", name], capture_output=True, timeout=10)
@@ -307,13 +310,24 @@ class ServiceManager:
 
     def _port_open(self, port: int, host: str = "localhost") -> bool:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            return result == 0
-        except Exception:
+            with socket.create_connection((host, port), timeout=2):
+                return True
+        except (OSError, socket.timeout):
             return False
+
+    def _detect_pg_version(self) -> str:
+        try:
+            r = subprocess.run(
+                "pg_lsclusters --no-header 2>/dev/null || pg_lsclusters 2>/dev/null || true",
+                shell=True, capture_output=True, text=True, timeout=5,
+            )
+            for line in r.stdout.splitlines():
+                parts = line.strip().split()
+                if parts and parts[0].isdigit():
+                    return parts[0]
+        except Exception:
+            pass
+        return "16"
 
     def _find_free_port(self, preferred: int) -> int:
         for port in range(preferred, preferred + 50):

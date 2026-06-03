@@ -352,22 +352,21 @@ class Pipeline:
             system_prompt=AGENT_SYSTEM_PROMPT,
         )
 
-        task = f"""Project: {self.project_path}
-Type: {self.project_type} | PM: {self.package_manager}
-Environment: {env_type}
-Working dir: {kwd or self.project_path}
-Services: {json.dumps(services_info)}
-Services needed (detected): {json.dumps(services_needed)}
-Env vars: {json.dumps(env)[:1000]}
-Key files: {json.dumps(project_files)[:3000]}
+        task = f"""STATUS: Services running, .env set, key files below.
 
-Run this project.
-- Key files are above — do NOT re-read them
-- If services are needed but not running, install them with install_service()
-- Check requirements.txt / imports for database deps (psycopg2, asyncpg, redis, etc)
-- {suggested_cmd or "Find and run the start command"}
-- Show all commands you run
-- Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}}) when serving"""
+Project: {self.project_path}
+Type: {self.project_type}
+Commands to try: {suggested_cmd or 'check requirements.txt for deps, find entry point, run'}
+Services already running: {json.dumps(services_info)}
+Env is set: {json.dumps(env)[:500]}
+Key files below — READ THEM ONCE, then act:
+{json.dumps(project_files)[:2000]}
+
+YOUR ONLY JOB: Install deps, run project, call done.
+- DO NOT re-read files, DO NOT check services, DO NOT analyze env
+- pip install -r requirements.txt if it exists
+- Then run the project with the correct command
+- Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}})"""
 
         from runit.agent_tools import TOOLS
         result = agent.run(task, TOOLS)
@@ -385,9 +384,12 @@ Run this project.
 
     def _read_key_files(self):
         files = {}
-        for name in ["README.md", "README.rst", "requirements.txt", "main.py", "app.py",
-                      "package.json", "Procfile", "Makefile", "Dockerfile", "docker-compose.yml",
-                      "index.js", "server.js", "app.js", "manage.py", "wsgi.py", "index.html"]:
+        candidates = ["README.md", "README.MD", "README.rst", "requirements.txt",
+                      "main.py", "app.py", "app/main.py", "app/__init__.py",
+                      "package.json", "Procfile", "Makefile", "Dockerfile",
+                      "docker-compose.yml", "index.js", "server.js", "app.js",
+                      "manage.py", "wsgi.py", "index.html"]
+        for name in candidates:
             p = Path(self.project_path) / name
             if p.exists() and p.stat().st_size < 50000:
                 try:
@@ -401,28 +403,40 @@ Run this project.
             if name == "Procfile":
                 m = re.search(r"web:\s*(.+)", content)
                 if m:
-                    return f"Run: {m.group(1).strip()}"
+                    return m.group(1).strip()
             if name == "Makefile":
                 if re.search(r"^run:", content, re.MULTILINE):
-                    return "Run: make run"
+                    return "make run"
             if name == "package.json":
                 try:
                     pkg = json.loads(content)
                     for s in ["dev", "start", "serve"]:
                         if s in pkg.get("scripts", {}):
-                            return f"Run: npm run {s}  (or: {pkg['scripts'][s][:80]})"
+                            return f"npm run {s}"
                 except Exception:
                     pass
             if name == "requirements.txt":
+                if "uvicorn" in content.lower() and "fastapi" in content.lower():
+                    return "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+                if "uvicorn" in content.lower():
+                    return "uvicorn main:app --host 0.0.0.0 --port 8000"
                 if "flask" in content.lower():
-                    return "Run: python app.py or python main.py  (Flask app)"
+                    return "python app.py  (Flask app, try app.py or main.py)"
                 if "django" in content.lower():
-                    return "Run: python manage.py runserver 0.0.0.0:8000"
-                if "fastapi" in content.lower() or "uvicorn" in content.lower():
-                    return "Run: uvicorn main:app --host 0.0.0.0 --port 8000"
-            if name in ("main.py", "app.py"):
-                if "flask" in content.lower() or "FastAPI" in content or "uvicorn" in content.lower():
-                    return "Run: python " + name
+                    return "python manage.py runserver 0.0.0.0:8000"
+            if name in ("app/main.py", "main.py", "app.py"):
+                if "FastAPI" in content or "fastapi" in content.lower():
+                    app_var = "app"
+                    for line in content.splitlines():
+                        m = re.match(r"app\s*=\s*FastAPI", line)
+                        if m:
+                            app_var = "app"
+                            break
+                    prefix = name.rsplit(".", 1)[0].replace("/", ".")
+                    return f"uvicorn {prefix}:{app_var} --host 0.0.0.0 --port 8000"
+                if "flask" in content.lower():
+                    prefix = name.rsplit(".", 1)[0].replace("/", ".")
+                    return f"python -m {prefix}"
         return ""
 
     def _tunnel_all_ports(self, result):
