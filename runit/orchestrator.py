@@ -528,8 +528,7 @@ class Pipeline:
 
             for _ in range(10):
                 if proc.poll() is not None:
-                    log = self._read_last_log(log_path, 30)
-                    return {"ok": False, "error": "Process exited", "log": log, "logfile": log_path}
+                    return self._process_crashed(log_path)
                 if port and self._port_open(port):
                     print(f"    \u2705  Running on port {port}")
                     return {"ok": True, "pid": proc.pid, "port": port,
@@ -544,11 +543,29 @@ class Pipeline:
                 return {"ok": True, "pid": proc.pid, "port": port,
                         "url": f"http://localhost:{port}", "logfile": log_path}
 
-            log = self._read_last_log(log_path, 30)
-            return {"ok": False, "error": "No port detected", "log": log, "logfile": log_path}
+            return self._process_crashed(log_path)
 
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def _process_crashed(self, log_path: str) -> dict:
+        log = self._read_last_log(log_path, 40)
+        error_line = self._extract_error(log)
+        if not error_line:
+            error_line = log.strip().split("\n")[-1] if log.strip() else "Process crashed"
+        print(f"    \U0001f4cb  {error_line[:200]}")
+        return {"ok": False, "error": error_line, "log": log, "logfile": log_path}
+
+    def _extract_error(self, log: str) -> str:
+        for line in log.splitlines():
+            line = line.strip()
+            for keyword in ["ModuleNotFoundError", "ImportError", "SyntaxError",
+                            "AttributeError", "TypeError", "ValueError", "KeyError",
+                            "FileNotFoundError", "PermissionError", "ConnectionError",
+                            "RuntimeError", "NameError", "OSError", "Error"]:
+                if line.startswith(keyword):
+                    return line[:200]
+        return ""
 
     def _kill_port(self, port: int):
         try:
