@@ -332,9 +332,8 @@ class Pipeline:
 
         if api_key:
             err = result.get("error", "")
-            log = result.get("log", "")
-            combined = f"{err}\n{log}"[:2000]
-            result = self._ai_fix_run(combined, project_files, suggested_cmd)
+            logfile = result.get("logfile", "")
+            result = self._ai_fix_run(err, logfile, project_files, suggested_cmd)
             if result.get("ok"):
                 self._generate_restart_script(result, suggested_cmd)
                 return result
@@ -369,8 +368,8 @@ class Pipeline:
         req_path = Path(self.project_path) / "requirements.txt"
         if not req_path.exists():
             return None
-        lines = []
         bad_names = {"install", "setup", "test", "nose", "wheel", "setuptools", "pip"}
+        lines = []
         for line in req_path.read_text().splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
@@ -381,14 +380,8 @@ class Pipeline:
                 print(f"    \u26a0\ufe0f  Skipping bad pkg: {name}")
                 continue
             if name_lower == "psycopg2":
-                line = "psycopg2-binary"
+                line = "psycopg2-binary" + (line[len(name):] if len(line) > len(name) else "")
                 print(f"    \u26a0\ufe0f  Replacing psycopg2 with psycopg2-binary")
-            else:
-                bare = re.split(r'[=<>~!]', line)[0].strip()
-                extras_match = re.match(r'(\S+)(\[.*?\])', bare)
-                if extras_match:
-                    bare = extras_match.group(1)
-                line = bare
             if line not in lines:
                 lines.append(line)
         cleaned = "\n".join(lines) + "\n"
@@ -445,12 +438,22 @@ class Pipeline:
             )
             return r.get("ok")
 
-        req_path = Path(self.project_path) / "requirements.txt"
-        cleaned = self._clean_requirements() if req_path.exists() else None
+        self._run_cmd(
+            "pip install --upgrade pip setuptools wheel -q --no-build-isolation"
+            " 2>/dev/null || "
+            "pip install --upgrade pip setuptools wheel -q --break-system-packages"
+            " 2>/dev/null || true",
+            timeout=120,
+        )
 
-        if cleaned:
+        req_path = Path(self.project_path) / "requirements.txt"
+        if req_path.exists():
+            self._clean_requirements()
             print(f"  \U0001f4e6  Installing dependencies...")
-            r = self._run_cmd("pip install -r requirements.txt -q", timeout=300)
+            r = self._run_cmd(
+                "pip install --no-build-isolation -r requirements.txt -q",
+                timeout=300,
+            )
             if r.get("ok"):
                 return True
             print(f"  \u26a0\ufe0f  Batch install failed — trying import-based install...")
@@ -460,13 +463,13 @@ class Pipeline:
             imports = ["fastapi", "uvicorn", "sqlalchemy", "psycopg2-binary",
                        "python-dotenv", "alembic", "pydantic", "requests", "flask"]
         print(f"  \U0001f50d  Installing {len(imports)} detected packages...")
-        r = self._run_cmd(f"pip install -q {' '.join(imports)}", timeout=300)
+        r = self._run_cmd(f"pip install -q --no-build-isolation {' '.join(imports)}", timeout=300)
         if r.get("ok"):
             return True
 
         print(f"  \u26a0\ufe0f  Group install failed — trying individually...")
         for pkg in imports:
-            self._run_cmd(f"pip install -q {pkg}", timeout=120)
+            self._run_cmd(f"pip install -q --no-build-isolation {pkg}", timeout=120)
         return True
 
     def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
@@ -526,7 +529,7 @@ class Pipeline:
             for _ in range(10):
                 if proc.poll() is not None:
                     log = self._read_last_log(log_path, 30)
-                    return {"ok": False, "error": "Process exited", "log": log}
+                    return {"ok": False, "error": "Process exited", "log": log, "logfile": log_path}
                 if port and self._port_open(port):
                     print(f"    \u2705  Running on port {port}")
                     return {"ok": True, "pid": proc.pid, "port": port,
@@ -542,7 +545,7 @@ class Pipeline:
                         "url": f"http://localhost:{port}", "logfile": log_path}
 
             log = self._read_last_log(log_path, 30)
-            return {"ok": False, "error": "No port detected", "log": log}
+            return {"ok": False, "error": "No port detected", "log": log, "logfile": log_path}
 
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -605,37 +608,103 @@ class Pipeline:
         except Exception:
             return ""
 
-    def _ai_fix_run(self, error: str, files: dict, suggested_cmd: str) -> dict:
+    def _ai_fix_run(self, error: str, logfile_path: str, files: dict, suggested_cmd: str) -> dict:
         cfg = load_config()
         api_key = cfg.get("api_key")
         if not api_key:
             return {"ok": False, "error": "No AI fix available"}
 
         from runit.llm import llm_call
-        prompt = f"""Project at {self.project_path} failed to run.
 
-Error: {error[:1000]}
+        full_log = ""
+        if logfile_path and os.path.exists(logfile_path):
+            try:
+                full_log = Path(logfile_path).read_text()[-3000:]
+            except Exception:
+                pass
 
-Files: {json.dumps(list(files.keys()))}
+        file_list = list(files.keys()) if files else []
+        py_files = []
+        try:
+            root = Path(self.project_path)
+            for f in sorted(root.rglob("*.py")):
+                rel = str(f.relative_to(root))
+                if not any(p in rel for p in [".runit", "__pycache__", "site-packages"]):
+                    if len(py_files) < 30:
+                        py_files.append(rel)
+        except Exception:
+            pass
+
+        max_rounds = 3
+        for attempt in range(max_rounds):
+            prompt = f"""Project at {self.project_path} failed to run.
+Attempt {attempt + 1}/{max_rounds}.
+
+Error: {error[:500]}
+Log tail:
+{full_log[:2000]}
+
+Key files: {json.dumps(file_list)}
+Python files: {json.dumps(py_files[:15])}
 Suggested cmd: {suggested_cmd}
 
-Analyze the error. Return ONLY JSON:
-{{"install":"pip install command (no cd, just pkg names)","run":"run command (no cd, full absolute path or module)","fix":"brief explanation"}}
+Diagnose the problem. Return ONLY JSON:
+{{"action":"install"|"run"|"apt"|"done","param":"...","reason":"..."}}
+
+- "install": pip install package(s). param = "pkg1 pkg2"
+- "apt": apt-get install. param = "pkg1 pkg2"  
+- "run": try this run command. param = full command
+- "done": mark as fixed. param = ""
 
 JSON only, no markdown:"""
-        try:
-            raw = llm_call(prompt)
-            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
-            plan = json.loads(raw)
-            if plan.get("install"):
-                if self._run_cmd(plan["install"], timeout=300).get("ok"):
-                    print(f"  \u2705  Install fixed")
-            if plan.get("run"):
-                return self._run_project_in_background(plan["run"])
-        except Exception as e:
-            return {"ok": False, "error": f"AI fix failed: {e}"}
+            try:
+                raw = llm_call(prompt)
+                raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
+                plan = json.loads(raw)
+                action = plan.get("action", "")
+                param = plan.get("param", "")
 
-        return {"ok": False, "error": "Could not fix"}
+                if action == "done":
+                    result = self._run_project_in_background(suggested_cmd)
+                    if result.get("ok"):
+                        return result
+                    error = result.get("error", "")
+                    full_log = ""
+                    if result.get("logfile") and os.path.exists(result["logfile"]):
+                        full_log = Path(result["logfile"]).read_text()[-3000:]
+                    continue
+
+                if action == "install":
+                    self._run_cmd(f"pip install -q --no-build-isolation {param}", timeout=300)
+                    result = self._run_project_in_background(suggested_cmd)
+                    if result.get("ok"):
+                        return result
+                    error = result.get("error", "")
+                    if result.get("logfile"):
+                        full_log = Path(result["logfile"]).read_text()[-3000:]
+                    continue
+
+                if action == "apt":
+                    self._run_cmd(f"apt-get install -y -qq {param}", timeout=120)
+                    continue
+
+                if action == "run":
+                    result = self._run_project_in_background(param)
+                    if result.get("ok"):
+                        return result
+                    error = result.get("error", "")
+                    if result.get("logfile"):
+                        full_log = Path(result["logfile"]).read_text()[-3000:]
+                    continue
+
+            except json.JSONDecodeError:
+                continue
+            except Exception as e:
+                if attempt == max_rounds - 1:
+                    return {"ok": False, "error": f"AI fix failed: {e}"}
+                continue
+
+        return {"ok": False, "error": "Could not fix after 3 attempts"}
 
     def _generate_restart_script(self, result: dict, cmd: str):
         lines = ["#!/bin/bash", "# Runit restart script", f"# Project: {self.project_path}", ""]
