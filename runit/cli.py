@@ -42,7 +42,7 @@ def print_banner():
         banner_text.append("     ⚡ Runit v2.1.2               ", style="bold cyan")
         banner_text.append("║\n", style="cyan")
         banner_text.append("║", style="cyan")
-        banner_text.append("  AI-Powered Repo Execution Agent     ", style="dim white")
+        banner_text.append("  Zero-Config Project Runner            ", style="dim white")
         banner_text.append("║\n", style="cyan")
         banner_text.append("║", style="cyan")
         banner_text.append('  "Make any project runnable"         ', style="italic yellow")

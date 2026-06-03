@@ -4,6 +4,7 @@ import re
 import time
 import socket
 import shutil
+import ast
 import urllib.parse
 import subprocess
 import threading
@@ -364,18 +365,112 @@ class Pipeline:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
-        install_cmd = self._detect_install_cmd(files)
+    def _clean_requirements(self) -> str | None:
+        req_path = Path(self.project_path) / "requirements.txt"
+        if not req_path.exists():
+            return None
+        lines = []
+        bad_names = {"install", "setup", "test", "nose", "wheel", "setuptools", "pip"}
+        for line in req_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            name = re.split(r'[=<>~!\[\];]', line)[0].strip()
+            name_lower = name.lower()
+            if name_lower in bad_names:
+                print(f"    \u26a0\ufe0f  Skipping bad pkg: {name}")
+                continue
+            if name_lower == "psycopg2":
+                line = "psycopg2-binary"
+                print(f"    \u26a0\ufe0f  Replacing psycopg2 with psycopg2-binary")
+            else:
+                bare = re.split(r'[=<>~!]', line)[0].strip()
+                extras_match = re.match(r'(\S+)(\[.*?\])', bare)
+                if extras_match:
+                    bare = extras_match.group(1)
+                line = bare
+            if line not in lines:
+                lines.append(line)
+        cleaned = "\n".join(lines) + "\n"
+        req_path.write_text(cleaned)
+        return cleaned
 
-        if install_cmd:
+    def _detect_imports(self) -> list[str]:
+        KNOWN_THIRD_PARTY = {
+            "fastapi", "uvicorn", "flask", "django", "sqlalchemy", "psycopg2",
+            "psycopg2-binary", "asyncpg", "alembic", "pydantic", "pydantic-settings",
+            "python-dotenv", "python-multipart", "httptools", "httpx", "requests",
+            "aiohttp", "aiofiles", "PIL", "Pillow", "numpy", "pandas", "scipy",
+            "matplotlib", "seaborn", "scikit-learn", "torch", "tensorflow",
+            "transformers", "tokenizers", "redis", "pymongo", "motor", "celery",
+            "rabbitmq", "kombu", "boto3", "botocore", "s3fs", "gcsfs", "fsspec",
+            "bcrypt", "cryptography", "jwt", "PyJWT", "python-jose", "passlib",
+            "email-validator", "dnspython", "python-multipart", "orjson",
+            "ujson", "python-dotenv", "sentry-sdk", "opentelemetry", "prometheus-client",
+            "click", "typer", "rich", "colorama", "tqdm", "loguru", "structlog",
+            "pytest", "coverage", "mypy", "black", "ruff", "isort", "flake8",
+            "python-dateutil", "pytz", "tzdata", "pyyaml", "toml", "tomli",
+            "watchfiles", "websockets", "starlette", "anyio", "h11", "idna",
+            "certifi", "chardet", "charset-normalizer", "urllib3", "cffi",
+            "ecdsa", "greenlet", "sniffio", "typing-extensions", "typing-inspect",
+            "annotated-types", "pydantic-core", "multipart",
+        }
+        detected = set()
+        py_files = list(Path(self.project_path).rglob("*.py"))
+        py_files = [f for f in py_files if "site-packages" not in str(f)
+                     and ".runit" not in str(f)]
+        for f in py_files:
+            try:
+                tree = ast.parse(f.read_text())
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            name = alias.name.split(".")[0]
+                            if name.lower() in KNOWN_THIRD_PARTY:
+                                detected.add(name)
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            name = node.module.split(".")[0]
+                            if name.lower() in KNOWN_THIRD_PARTY:
+                                detected.add(name)
+            except Exception:
+                pass
+        return sorted(detected)
+
+    def _install_deps(self, files: dict) -> bool:
+        if self.project_type == "node":
+            r = self._run_cmd(
+                f"{self.package_manager} install --no-optional --legacy-peer-deps",
+                timeout=300,
+            )
+            return r.get("ok")
+
+        req_path = Path(self.project_path) / "requirements.txt"
+        cleaned = self._clean_requirements() if req_path.exists() else None
+
+        if cleaned:
             print(f"  \U0001f4e6  Installing dependencies...")
-            r = self._run_cmd(install_cmd, timeout=300)
-            if not r.get("ok"):
-                print(f"  \u26a0\ufe0f  pip failed — trying to fix...")
-                r = self._fix_and_install(files)
-                if not r.get("ok"):
-                    print(f"  \u26a0\ufe0f  Batch install failed — trying key packages...")
-                    self._install_key_packages(files)
+            r = self._run_cmd("pip install -r requirements.txt -q", timeout=300)
+            if r.get("ok"):
+                return True
+            print(f"  \u26a0\ufe0f  Batch install failed — trying import-based install...")
+
+        imports = self._detect_imports()
+        if not imports:
+            imports = ["fastapi", "uvicorn", "sqlalchemy", "psycopg2-binary",
+                       "python-dotenv", "alembic", "pydantic", "requests", "flask"]
+        print(f"  \U0001f50d  Installing {len(imports)} detected packages...")
+        r = self._run_cmd(f"pip install -q {' '.join(imports)}", timeout=300)
+        if r.get("ok"):
+            return True
+
+        print(f"  \u26a0\ufe0f  Group install failed — trying individually...")
+        for pkg in imports:
+            self._run_cmd(f"pip install -q {pkg}", timeout=120)
+        return True
+
+    def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
+        install_success = self._install_deps(files)
 
         run_cmd = suggested_cmd or self._detect_run_cmd(files)
         if run_cmd:
@@ -385,43 +480,12 @@ class Pipeline:
                 log = result.get("log", "")
                 if log:
                     print(f"    \U0001f4cb  {log[:500]}")
-                return self._ai_fix_run(result.get("error", "") + "\n" + log, files, run_cmd)
+                if install_success:
+                    result["error"] = "Process exited or no port detected"
+                return result
             return result
 
         return {"ok": False, "error": "No run command detected"}
-
-    def _fix_and_install(self, files: dict) -> dict:
-        req_path = Path(self.project_path) / "requirements.txt"
-        if not req_path.exists():
-            return {"ok": False, "error": "No requirements.txt"}
-        lines = [l.strip() for l in req_path.read_text().splitlines()
-                 if l.strip() and not l.startswith("#")]
-        bad_pkgs = []
-        good_pkgs = []
-        for line in lines:
-            pkg = re.split(r'[=<>~!]', line)[0].strip()
-            if pkg.lower() in ("install", "setup", "test", "nose"):
-                bad_pkgs.append(line)
-            else:
-                good_pkgs.append(line)
-        if bad_pkgs:
-            print(f"    \u26a0\ufe0f  Skipping suspicious packages: {', '.join(bad_pkgs)}")
-            req_path.write_text("\n".join(good_pkgs) + "\n")
-        return self._run_cmd("pip install -r requirements.txt -q", timeout=300)
-
-    def _install_key_packages(self, files: dict):
-        py_pkgs = ["fastapi", "uvicorn", "sqlalchemy", "psycopg2-binary",
-                    "flask", "django", "redis", "pymongo", "requests",
-                    "python-dotenv", "alembic", "pydantic"]
-        needed = []
-        if "requirements.txt" in files:
-            content = files["requirements.txt"].lower()
-            for pkg in py_pkgs:
-                if pkg in content:
-                    needed.append(pkg)
-        if not needed:
-            needed = ["fastapi", "uvicorn"]
-        self._run_cmd(f"pip install -q {' '.join(needed)}", timeout=300)
 
     def _detect_run_cmd(self, files: dict) -> str | None:
         for f in ["app/main.py", "main.py", "app.py", "manage.py"]:
@@ -435,22 +499,6 @@ class Pipeline:
                 if "django" in content.lower() or "manage.py" == f:
                     return f"python {f} runserver 0.0.0.0:8000"
                 return f"python {f}"
-        return None
-
-    def _detect_install_cmd(self, files: dict) -> str | None:
-        if "requirements.txt" in files:
-            return "pip install -r requirements.txt -q"
-        if "package.json" in files:
-            return "npm install"
-        if "Makefile" in files:
-            return None
-        return None
-
-    def _fallback_install(self, cmd: str) -> str | None:
-        if "pip" in cmd:
-            return "pip install --break-system-packages -r requirements.txt -q"
-        if "npm" in cmd:
-            return "npm install --no-optional --legacy-peer-deps"
         return None
 
     def _run_project_in_background(self, cmd: str) -> dict:
@@ -475,9 +523,7 @@ class Pipeline:
                 )
             self.pm.add_process("app", proc)
 
-            time.sleep(2)
-
-            for _ in range(20):
+            for _ in range(10):
                 if proc.poll() is not None:
                     log = self._read_last_log(log_path, 30)
                     return {"ok": False, "error": "Process exited", "log": log}
@@ -485,7 +531,7 @@ class Pipeline:
                     print(f"    \u2705  Running on port {port}")
                     return {"ok": True, "pid": proc.pid, "port": port,
                             "url": f"http://localhost:{port}", "logfile": log_path}
-                time.sleep(1)
+                time.sleep(0.5)
 
             if not port:
                 port = self._scan_for_port(proc.pid)
@@ -495,8 +541,8 @@ class Pipeline:
                 return {"ok": True, "pid": proc.pid, "port": port,
                         "url": f"http://localhost:{port}", "logfile": log_path}
 
-            log = self._read_last_log(log_path, 20)
-            return {"ok": False, "error": "No port detected after 20s", "log": log}
+            log = self._read_last_log(log_path, 30)
+            return {"ok": False, "error": "No port detected", "log": log}
 
         except Exception as e:
             return {"ok": False, "error": str(e)}
