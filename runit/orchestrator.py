@@ -5,6 +5,7 @@ import time
 import socket
 import shutil
 import ast
+import shlex
 import urllib.parse
 import subprocess
 import threading
@@ -388,6 +389,15 @@ class Pipeline:
         req_path.write_text(cleaned)
         return cleaned
 
+    def _clean_pydantic_so(self):
+        self._run_cmd(
+            "python3 -c \""
+            "import pydantic, os, glob; d=os.path.dirname(pydantic.__file__); "
+            "[os.remove(f) for f in glob.glob(os.path.join(d, '*.so'))]"
+            "\" 2>/dev/null || true",
+            timeout=15,
+        )
+
     def _detect_imports(self) -> list[str]:
         KNOWN_THIRD_PARTY = {
             "fastapi", "uvicorn", "flask", "django", "sqlalchemy", "psycopg2",
@@ -455,11 +465,7 @@ class Pipeline:
                 timeout=300,
             )
             if r.get("ok"):
-                self._run_cmd(
-                    "pip install -q 'pydantic>=1.9.0,<2' 2>/dev/null"
-                    " || pip install -q --break-system-packages 'pydantic>=1.9.0,<2'",
-                    timeout=120,
-                )
+                self._clean_pydantic_so()
                 return True
             print(f"  \u26a0\ufe0f  Batch install failed — trying import-based install...")
 
@@ -470,11 +476,7 @@ class Pipeline:
         print(f"  \U0001f50d  Installing {len(imports)} detected packages...")
         r = self._run_cmd(f"pip install -q --no-build-isolation {' '.join(imports)}", timeout=300)
         if r.get("ok"):
-            self._run_cmd(
-                "pip install -q 'pydantic>=1.9.0,<2' 2>/dev/null"
-                " || pip install -q --break-system-packages 'pydantic>=1.9.0,<2'",
-                timeout=120,
-            )
+            self._clean_pydantic_so()
             return True
 
         print(f"  \u26a0\ufe0f  Group install failed — trying individually...")
@@ -674,7 +676,7 @@ Suggested cmd: {suggested_cmd}
 Diagnose the problem. Return ONLY JSON:
 {{"action":"install"|"run"|"apt"|"done","param":"...","reason":"..."}}
 
-- "install": pip install package(s). USE == NOT < > (shell-safe). param = "pkg1 pkg2==version"
+- "install": pip install. param = "pkg1 'pkg2<2' 'pkg3>=3'" (space-separated, each quoted if version spec)
 - "apt": apt-get install. param = "pkg1 pkg2"  
 - "run": try this run command. param = full command
 - "done": mark as fixed, try running again. param = ""
@@ -698,8 +700,9 @@ JSON only, no markdown:"""
                     continue
 
                 if action == "install":
-                    safe_param = param.replace("<", "=").replace(">", "=").replace("|", " ").replace("&", " ")
-                    self._run_cmd(f"pip install -q --no-build-isolation '{safe_param}'", timeout=300)
+                    pkgs = shlex.split(param)
+                    pkgs_quoted = " ".join(f"'{p}'" for p in pkgs)
+                    self._run_cmd(f"pip install -q --no-build-isolation {pkgs_quoted}", timeout=300)
                     result = self._run_project_in_background(suggested_cmd)
                     if result.get("ok"):
                         return result
