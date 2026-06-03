@@ -11,9 +11,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from runit.cli import _console, print_step, AUTO_YES
-from runit.agent_tools import _init_state
-from runit.agent_core import AgentCore
-from runit.agent_prompts import AGENT_SYSTEM_PROMPT
 from runit.service_manager import ServiceManager, service_name_from_env
 from runit.service_defs import SERVICE_DEFS
 from runit.env_resolver import EnvResolver, is_critical
@@ -41,7 +38,6 @@ class Pipeline:
         self.required_services = []
         self.env_vars = {}
         self.tunnel_urls = {}
-        _init_state(project_path, env_type)
 
     def run(self) -> dict:
         if self.c:
@@ -319,68 +315,242 @@ class Pipeline:
     def _agent_run(self) -> dict:
         cfg = load_config()
         api_key = cfg.get("api_key")
-        if not api_key:
-            print("  \u26a0\ufe0f  No API key configured. Run with --setup or set RUNIT_API_KEY")
-            return {"ok": False, "error": "No API key"}
 
-        env = self._resolve_env_pass()
-        self.env_vars = env
-        if env:
+        self.env_vars = self._resolve_env_pass()
+        if self.env_vars:
             env_file = Path(self.project_path) / ".env"
-            env_file.write_text("\n".join(f"{k}={v}" for k, v in env.items()) + "\n")
-
-        services_info = {}
-        for name, entry in self.sm.running.items():
-            port = entry.get("port", entry["defs"]["port"])
-            url = entry["defs"].get("connection_url", "").format(host="localhost", port=port)
-            services_info[name] = {"url": url, "port": port}
+            env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
 
         project_files = self._read_key_files()
         suggested_cmd = self._suggest_run_command(project_files)
 
-        from runit.environment import detect_env, kaggle_working_dir
-        env_type = detect_env()
-        kwd = kaggle_working_dir()
+        result = self._deterministic_run(project_files, suggested_cmd)
+        if result.get("ok"):
+            self._generate_restart_script(result, suggested_cmd)
+            return result
 
-        services_needed = list(self.sm.running.keys())
-        if not services_needed:
-            services_needed = self.required_services
+        if api_key:
+            result = self._ai_fix_run(result.get("error", ""), project_files, suggested_cmd)
+            if result.get("ok"):
+                self._generate_restart_script(result, suggested_cmd)
+                return result
 
-        agent = AgentCore(
-            self.project_path, console=self.c, auto_yes=self.auto_yes,
-            max_steps=self.max_retries,
-            system_prompt=AGENT_SYSTEM_PROMPT,
-        )
+        return {"ok": False, "error": "Could not run project"}
 
-        task = f"""STATUS: Services running, .env set, key files below.
+    def _print_cmd(self, cmd: str):
+        print(f"  \U0001f4bb  ! {cmd}")
 
-Project: {self.project_path}
-Type: {self.project_type}
-Commands to try: {suggested_cmd or 'check requirements.txt for deps, find entry point, run'}
-Services already running: {json.dumps(services_info)}
-Env is set: {json.dumps(env)[:500]}
-Key files below — READ THEM ONCE, then act:
-{json.dumps(project_files)[:2000]}
+    def _run_cmd(self, cmd: str, cwd: str | None = None, timeout: int = 180) -> dict:
+        self._print_cmd(cmd)
+        try:
+            r = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True,
+                cwd=cwd or self.project_path, timeout=timeout,
+            )
+            out = (r.stdout or "")[:3000]
+            err = (r.stderr or "")[:1000]
+            if out.strip():
+                print(f"{out}")
+            if err.strip():
+                print(f"  [stderr] {err}")
+            if r.returncode != 0:
+                print(f"  \u274c  exit code {r.returncode}")
+            return {"ok": r.returncode == 0, "output": out, "error": err, "returncode": r.returncode}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": f"Timed out ({timeout}s)"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
-YOUR ONLY JOB: Install deps, run project, call done.
-- DO NOT re-read files, DO NOT check services, DO NOT analyze env
-- pip install -r requirements.txt if it exists
-- Then run the project with the correct command
-- Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}})"""
+    def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
+        install_cmd = self._detect_install_cmd(files)
 
-        from runit.agent_tools import TOOLS
-        result = agent.run(task, TOOLS)
+        if install_cmd:
+            print(f"  \U0001f4e6  Installing dependencies...")
+            r = self._run_cmd(install_cmd, timeout=300)
+            if not r.get("ok") and "not found" in r.get("error", "") + r.get("output", ""):
+                alt = self._fallback_install(install_cmd)
+                if alt:
+                    self._run_cmd(alt, timeout=300)
 
-        if result.get("status") == "success":
-            r = result.get("result", {})
-            if isinstance(r, str):
-                try:
-                    r = json.loads(r)
-                except Exception:
-                    r = {"ok": True, "info": r}
-            return r
+        if suggested_cmd:
+            print(f"  \U000025b6  Starting project...")
+            return self._run_project_in_background(suggested_cmd)
 
-        return {"ok": False, "error": "Agent failed"}
+        if "main.py" in files or "app.py" in files or "app/main.py" in files:
+            for f in ["app/main.py", "main.py", "app.py"]:
+                if f in files:
+                    content = files[f]
+                    if "FastAPI" in content or "fastapi" in content.lower():
+                        prefix = f.rsplit(".", 1)[0].replace("/", ".")
+                        cmd = f"uvicorn {prefix}:app --host 0.0.0.0 --port 8000"
+                        return self._run_project_in_background(cmd)
+                    if "flask" in content.lower():
+                        cmd = f"python {f}"
+                        return self._run_project_in_background(cmd)
+                    cmd = f"python {f}"
+                    return self._run_project_in_background(cmd)
+
+        return {"ok": False, "error": "No run command detected"}
+
+    def _detect_install_cmd(self, files: dict) -> str | None:
+        if "requirements.txt" in files:
+            return "pip install -r requirements.txt -q"
+        if "package.json" in files:
+            return "npm install"
+        if "Makefile" in files:
+            return None
+        return None
+
+    def _fallback_install(self, cmd: str) -> str | None:
+        if "pip" in cmd:
+            return "pip install --break-system-packages -r requirements.txt -q"
+        if "npm" in cmd:
+            return "npm install --no-optional --legacy-peer-deps"
+        return None
+
+    def _run_project_in_background(self, cmd: str) -> dict:
+        self._print_cmd(cmd)
+        env = os.environ.copy()
+        env.update(self.env_vars)
+        log_dir = Path(self.project_path) / ".runit"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logfile = log_dir / "app.log"
+        log_path = str(logfile)
+
+        try:
+            with open(log_path, "w") as f:
+                proc = subprocess.Popen(
+                    cmd, shell=True, stdout=f, stderr=subprocess.STDOUT,
+                    cwd=self.project_path, env=env,
+                    preexec_fn=os.setsid,
+                )
+            self.pm.add_process("app", proc)
+
+            port = self._detect_port_from_cmd(cmd)
+            time.sleep(2)
+
+            for _ in range(15):
+                if proc.poll() is not None:
+                    log = self._read_last_log(log_path, 20)
+                    return {"ok": False, "error": f"Process exited: {log}"}
+                if port and self._port_open(port):
+                    print(f"    \u2705  Running on port {port}")
+                    return {"ok": True, "pid": proc.pid, "port": port,
+                            "url": f"http://localhost:{port}", "logfile": log_path}
+                time.sleep(1)
+
+            if not port:
+                port = self._scan_for_port(proc.pid)
+                if port:
+                    print(f"    \u2705  Running on port {port}")
+                    return {"ok": True, "pid": proc.pid, "port": port,
+                            "url": f"http://localhost:{port}", "logfile": log_path}
+
+            log = self._read_last_log(log_path, 10)
+            return {"ok": True, "pid": proc.pid, "port": port or 0,
+                    "url": f"http://localhost:{port}" if port else "",
+                    "logfile": log_path, "log": log}
+
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _detect_port_from_cmd(self, cmd: str) -> int | None:
+        m = re.search(r"--port\s+(\d+)", cmd)
+        if m:
+            return int(m.group(1))
+        m = re.search(r":(\d+)", cmd.split()[-1] if " " in cmd else "")
+        if m:
+            return int(m.group(1))
+        return None
+
+    def _port_open(self, port: int) -> bool:
+        try:
+            with socket.create_connection(("localhost", port), timeout=2):
+                return True
+        except (OSError, socket.timeout):
+            return False
+
+    def _scan_for_port(self, pid: int) -> int | None:
+        try:
+            r = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5)
+            for line in r.stdout.splitlines():
+                if str(pid) in line:
+                    m = re.search(r":(\d+)", line)
+                    if m:
+                        return int(m.group(1))
+        except Exception:
+            pass
+        try:
+            with open(f"/proc/{pid}/net/tcp") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) > 1 and parts[1] != "local_address":
+                        hex_port = parts[1].split(":")[1]
+                        port = int(hex_port, 16)
+                        if 1024 <= port <= 65535:
+                            return port
+        except Exception:
+            pass
+        return None
+
+    def _read_last_log(self, log_path: str, n: int = 10) -> str:
+        try:
+            r = subprocess.run(["tail", f"-{n}", log_path], capture_output=True, text=True, timeout=5)
+            return r.stdout
+        except Exception:
+            return ""
+
+    def _ai_fix_run(self, error: str, files: dict, suggested_cmd: str) -> dict:
+        cfg = load_config()
+        api_key = cfg.get("api_key")
+        if not api_key:
+            return {"ok": False, "error": "No AI fix available"}
+
+        from runit.llm import llm_call
+        prompt = f"""Project at {self.project_path} failed to run.
+
+Error: {error[:1000]}
+
+Files: {json.dumps(list(files.keys()))}
+Suggested cmd: {suggested_cmd}
+
+Analyze the error and return:
+{{"install":"pip command to fix","run":"correct run command","fix":"what went wrong"}}
+
+JSON only, no markdown:"""
+        try:
+            raw = llm_call(prompt)
+            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
+            plan = json.loads(raw)
+            if plan.get("install"):
+                if self._run_cmd(plan["install"], timeout=300).get("ok"):
+                    print(f"  \u2705  Install fixed")
+            if plan.get("run"):
+                return self._run_project_in_background(plan["run"])
+        except Exception as e:
+            return {"ok": False, "error": f"AI fix failed: {e}"}
+
+        return {"ok": False, "error": "Could not fix"}
+
+    def _generate_restart_script(self, result: dict, cmd: str):
+        lines = ["#!/bin/bash", "# Runit restart script", f"# Project: {self.project_path}", ""]
+        env_file = Path(self.project_path) / ".env"
+        if env_file.exists():
+            lines.append(f"# Source .env")
+            lines.append(f"set -a && source {env_file} && set +a")
+            lines.append("")
+        if cmd:
+            lines.append(f"# Start the project")
+            lines.append(f"cd {self.project_path}")
+            lines.append(f"{cmd} &")
+            lines.append(f"echo 'PID: $!'")
+            lines.append("")
+
+        script_path = Path(self.project_path) / "restart.sh"
+        script_path.write_text("\n".join(lines) + "\n")
+        os.chmod(str(script_path), 0o755)
+        print(f"  \U0001f4c4  Restart script: {script_path}")
+        print(f"  \U0001f4bb  ! bash {script_path}")
 
     def _read_key_files(self):
         files = {}
@@ -495,6 +665,7 @@ YOUR ONLY JOB: Install deps, run project, call done.
         bin_path = shutil.which("cloudflared") or shutil.which("/tmp/cloudflared")
         if not bin_path:
             print(f"  \U0001f4e1  Downloading cloudflared...")
+            print(f"  \U0001f4bb  ! curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared && chmod +x /tmp/cloudflared")
             try:
                 url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
                 subprocess.run(f"curl -sL {url} -o /tmp/cloudflared && chmod +x /tmp/cloudflared",
@@ -603,35 +774,42 @@ YOUR ONLY JOB: Install deps, run project, call done.
         dashboard_url = self.tunnel_urls.get("dashboard", "")
 
         print(f"\n  \u2705  {self.project_name} is running!")
-        print(f"  {'=' * 50}")
+        print(f"  {'=' * 55}")
         if dashboard_url:
             print(f"  \U0001f4ca  Dashboard: {dashboard_url}")
         if public_url:
-            print(f"  \U0001f310  Public: {public_url}")
+            print(f"  \U0001f310  Public URL: {public_url}")
         for port_str, url in sorted(public_urls.items()):
             if url != public_url:
                 print(f"  \U0001f310  Port {port_str}: {url}")
         if result.get("url"):
-            print(f"  \U0001f310  Local:  {result['url']}")
+            print(f"  \U0001f310  Local:      {result['url']}")
         if result.get("port"):
-            print(f"  \U0001f5a5  Port: {result['port']}")
-        if result.get("pids"):
-            print(f"  \U0001f9f9  PIDs: {', '.join(str(p) for p in result['pids'])}")
+            print(f"  \U0001f5a5  Port:       {result['port']}")
         if result.get("pid"):
-            print(f"  \U0001f9f9  PID:  {result['pid']}")
-        print(f"  \U0001f4c2  Path: {self.project_path}")
+            print(f"  \U0001f9f9  PID:        {result['pid']}")
+        print(f"  \U0001f4c2  Path:       {self.project_path}")
         logfile = result.get("logfile", "")
         if logfile:
-            print(f"  \U0001f4cb  Log:  {logfile}")
+            print(f"  \U0001f4cb  Log:        {logfile}")
+            log_tail = self._read_last_log(logfile, 5)
+            if log_tail.strip():
+                for line in log_tail.strip().splitlines()[-3:]:
+                    print(f"         {line[:120]}")
         elif result.get("pid"):
-            print(f"  \U0001f4cb  Log:  {self.project_path}/.runit/app.log")
+            log_path = f"{self.project_path}/.runit/app.log"
+            print(f"  \U0001f4cb  Log:        {log_path}")
         svcs = list(self.sm.running.keys())
         if svcs:
-            print(f"  \U0001f6e0  Services: {', '.join(svcs)}")
-        print(f"  {'=' * 50}")
+            print(f"  \U0001f6e0  Services:   {', '.join(svcs)}")
+        restart_script = Path(self.project_path) / "restart.sh"
+        if restart_script.exists():
+            print(f"  \U0001f4c4  Restart:    bash {restart_script}")
+            print(f"         ! bash {restart_script}")
+        print(f"  {'=' * 55}")
         print(f"  \U0001f4bb  cd {self.project_path}")
         if result.get("pid"):
-            print(f"  \U0001f6d1  Stop: kill {result['pid']}")
+            print(f"  \U0001f6d1  Stop:       kill {result['pid']}")
 
     def _print_failure(self, result: dict):
         print(f"\n  \u274c  Could not run {self.project_name}")
