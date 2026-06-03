@@ -158,21 +158,31 @@ class Pipeline:
             print("  \u2705  No .env.example found")
             return
 
-        env = self._resolve_env_pass()
-        self.env_vars = env
+        self.env_vars = self._resolve_env_pass()
 
-        critical_missing = []
+        all_vars = []
         for line in env_path.read_text().splitlines():
             if "=" in line and not line.strip().startswith("#"):
                 key = line.split("=", 1)[0].strip()
-                if is_critical(key) and not env.get(key):
-                    critical_missing.append(key)
+                all_vars.append(key)
 
-        if critical_missing:
+        if not all_vars:
+            print("    \u2705  No vars to resolve")
+            return
+
+        env_file = Path(self.project_path) / ".env"
+        env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
+        print(f"    \u2705  Written {len(self.env_vars)} vars to .env")
+
+        critical_missing = [v for v in all_vars if is_critical(v) and not self.env_vars.get(v)]
+
+        if self.auto_yes and is_notebook_env() and all_vars:
+            self._env_web_ui(all_vars)
+            env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
+        elif not self.auto_yes and critical_missing:
             if is_notebook_env():
-                submitted = self._env_web_ui(critical_missing)
-                self.env_vars.update(submitted)
-            elif not self.auto_yes:
+                self._env_web_ui(all_vars)
+            else:
                 for var in critical_missing:
                     try:
                         val = input(f"  \U0001f511  Enter {var}: ")
@@ -180,10 +190,7 @@ class Pipeline:
                             self.env_vars[var] = val.strip()
                     except (EOFError, KeyboardInterrupt):
                         pass
-
-        env_file = Path(self.project_path) / ".env"
-        env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
-        print(f"    \u2705  Written {len(self.env_vars)} vars to .env")
+            env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
 
     def _env_ui_form_html(self, var_names):
         rows = []
@@ -232,7 +239,6 @@ class Pipeline:
         if result_file.exists():
             result_file.unlink()
 
-        form_html = self._env_ui_form_html(var_names)
         submitted = {}
 
         class EnvUIHandler(BaseHTTPRequestHandler):
@@ -240,7 +246,48 @@ class Pipeline:
                 self_.send_response(200)
                 self_.send_header("Content-Type", "text/html; charset=utf-8")
                 self_.end_headers()
-                self_.wfile.write(form_html.encode())
+                self_.wfile.write(self_._form_html().encode())
+
+            def _form_html(self_):
+                rows = []
+                for v in var_names:
+                    current = self.env_vars.get(v, "")
+                    val_attr = f' value="{current}"' if current else ""
+                    rows.append(f"""
+        <div class="field">
+          <label for="{v}">{v}</label>
+          <input id="{v}" name="{v}" type="text"{val_attr}>
+        </div>""")
+                return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runit - Set Environment Variables</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font:16px/1.5 system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}}
+  .card{{background:#1e293b;padding:2rem;border-radius:12px;width:90%;max-width:520px}}
+  h1{{font-size:1.3rem;margin-bottom:.25rem}}
+  p{{color:#94a3b8;margin-bottom:1.5rem;font-size:.9rem}}
+  .field{{margin-bottom:1rem}}
+  label{{display:block;font-size:.8rem;font-weight:600;color:#94a3b8;margin-bottom:.3rem;word-break:break-all}}
+  input{{width:100%;padding:.6rem .8rem;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:.9rem;outline:none;transition:border-color .15s}}
+  input:focus{{border-color:#6366f1}}
+  button{{width:100%;padding:.7rem;background:#6366f1;border:none;border-radius:8px;color:#fff;font-size:.95rem;font-weight:600;cursor:pointer;margin-top:.5rem}}
+  button:hover{{background:#4f46e5}}
+  .small{{font-size:.75rem;color:#64748b;text-align:center;margin-top:1rem}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>⚡ Runit — Environment Variables</h1>
+  <p>Fill the <strong>{len(var_names)}</strong> required variables, then click Save.</p>
+  <form method="POST" action="/">{"".join(rows)}
+    <button type="submit">Save &amp; Continue</button>
+  </form>
+  <div class="small">Values already set are pre-filled. Edit or leave as-is.</div>
+</div>
+</body>
+</html>"""
 
             def do_POST(self_):
                 length = int(self_.headers.get("Content-Length", 0))
@@ -249,8 +296,8 @@ class Pipeline:
                 for var in var_names:
                     vals = parsed.get(var, [])
                     if vals and vals[0].strip():
-                        submitted[var] = vals[0].strip()
-                result_file.write_text(json.dumps(submitted))
+                        self.env_vars[var] = vals[0].strip()
+                result_file.write_text(json.dumps(self.env_vars))
                 self_.send_response(200)
                 self_.send_header("Content-Type", "text/html; charset=utf-8")
                 self_.end_headers()
@@ -276,6 +323,7 @@ class Pipeline:
                 if result_file.exists():
                     try:
                         submitted = json.loads(result_file.read_text())
+                        self.env_vars.update(submitted)
                         break
                     except Exception:
                         pass
@@ -284,7 +332,6 @@ class Pipeline:
             print("    \u23f3  Skipped env UI, continuing...")
 
         server.shutdown()
-        return submitted
 
     def _resolve_env_pass(self):
         env_path = Path(self.project_path) / ".env.example"
@@ -325,28 +372,25 @@ class Pipeline:
             url = entry["defs"].get("connection_url", "").format(host="localhost", port=port)
             services_info[name] = {"url": url, "port": port}
 
+        project_files = self._read_key_files()
+        suggested_cmd = self._suggest_run_command(project_files)
+
         agent = AgentCore(
             self.project_path, console=self.c, auto_yes=self.auto_yes,
             max_steps=self.max_retries,
             system_prompt=AGENT_SYSTEM_PROMPT,
         )
 
-        task = f"""Set up and run the project at {self.project_path}.
+        task = f"""Project: {self.project_path}
+Type: {self.project_type} | PM: {self.package_manager}
+Services: {json.dumps(services_info)}
+Env: {json.dumps(env)[:1000]}
+Key files: {json.dumps(project_files)[:3000]}
 
-Project type: {self.project_type}
-Package manager: {self.package_manager}
-Services running: {json.dumps(services_info)}
-Env vars from .env / .env.example: {json.dumps(env)[:2000]}
-
-Your job:
-1. Read the README, code files, and project structure to understand what this project does
-2. Install dependencies needed (pip install, npm install, etc.)
-3. Build if needed
-4. Run the project
-5. Keep it running and call done() with: {{"ok": true, "urls": [list of localhost URLs found], "pids": [list of PIDs], "logfile": "path to log file"}}
-
-You have full access to: read/write/edit/delete files, run CLI commands, search the web.
-Do NOT plan ahead — just check what's needed at each step and do it."""
+Run it.
+- Already have key files above, do NOT read them again
+- {suggested_cmd or "Figure out and run the start command"}
+- Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}}) when running"""
 
         from runit.agent_tools import TOOLS
         result = agent.run(task, TOOLS)
@@ -361,6 +405,48 @@ Do NOT plan ahead — just check what's needed at each step and do it."""
             return r
 
         return {"ok": False, "error": "Agent failed"}
+
+    def _read_key_files(self):
+        files = {}
+        for name in ["README.md", "README.rst", "requirements.txt", "main.py", "app.py",
+                      "package.json", "Procfile", "Makefile", "Dockerfile", "docker-compose.yml",
+                      "index.js", "server.js", "app.js", "manage.py", "wsgi.py", "index.html"]:
+            p = Path(self.project_path) / name
+            if p.exists() and p.stat().st_size < 50000:
+                try:
+                    files[name] = p.read_text(errors="replace")[:3000]
+                except Exception:
+                    pass
+        return files
+
+    def _suggest_run_command(self, files):
+        for name, content in files.items():
+            if name == "Procfile":
+                m = re.search(r"web:\s*(.+)", content)
+                if m:
+                    return f"Run: {m.group(1).strip()}"
+            if name == "Makefile":
+                if re.search(r"^run:", content, re.MULTILINE):
+                    return "Run: make run"
+            if name == "package.json":
+                try:
+                    pkg = json.loads(content)
+                    for s in ["dev", "start", "serve"]:
+                        if s in pkg.get("scripts", {}):
+                            return f"Run: npm run {s}  (or: {pkg['scripts'][s][:80]})"
+                except Exception:
+                    pass
+            if name == "requirements.txt":
+                if "flask" in content.lower():
+                    return "Run: python app.py or python main.py  (Flask app)"
+                if "django" in content.lower():
+                    return "Run: python manage.py runserver 0.0.0.0:8000"
+                if "fastapi" in content.lower() or "uvicorn" in content.lower():
+                    return "Run: uvicorn main:app --host 0.0.0.0 --port 8000"
+            if name in ("main.py", "app.py"):
+                if "flask" in content.lower() or "FastAPI" in content or "uvicorn" in content.lower():
+                    return "Run: python " + name
+        return ""
 
     def _tunnel_all_ports(self, result):
         pids = result.get("pids", [])

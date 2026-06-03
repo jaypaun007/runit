@@ -16,65 +16,27 @@ class AgentCore:
         self.steps_taken = 0
         self.last_result = None
         self.error_history = []
-        self.context = {}
-        self.action_history = []
+        self.last_tool = None
 
     def cprint(self, msg):
         if self.c:
             self.c.print(msg)
-
-    def _is_repeating(self, tool: str, args: dict) -> bool:
-        sig = (tool, str(sorted(args.items())))
-        recent = self.action_history[-5:]
-        count = sum(1 for a in recent if a == sig)
-        if count >= 2:
-            self.error_history.append(f"Repeated action: {tool}")
-            return True
-        return False
-
-    def _force_new_tool(self):
-        tools_used = set(a[0] for a in self.action_history[-10:])
-        suggestions = []
-        if "research_project" in tools_used and "read_file" not in tools_used:
-            suggestions.append("read_file")
-        if "read_file" in tools_used and "run_command" not in tools_used:
-            suggestions.append("run_command")
-        if "list_dir" not in tools_used:
-            suggestions.append("list_dir")
-        if suggestions:
-            return f"You've been repeating tools. Try something different like: {', '.join(suggestions)}"
-        return ""
 
     def run(self, task: str, tools: dict) -> dict:
         cfg = load_config()
         if not cfg.get("api_key"):
             return {"status": "no_api", "result": "AI agent requires an API key"}
 
-        context = f"""Task: {task}
-Project: {self.project_path}
-
-Work through this step by step. Use tools to explore, understand, and execute.
-IMPORTANT: 
-- You can ask the user for API keys, passwords, or choices using ask_user.
-- If research_project returns empty data, read files directly with read_file and list_dir.
-- NEVER call the same tool more than twice in a row. Try different approaches."""
-
         while self.steps_taken < self.max_steps:
             self.steps_taken += 1
 
-            extra_hint = self._force_new_tool()
-            warning = ""
-            if extra_hint:
-                warning = f"\n\n⚠️  {extra_hint}"
+            prompt = f"""{task}
 
-            prompt = f"""{context}
+Last: {self.last_result or 'start'}
+Error: {self.error_history[-1] if self.error_history else 'none'}
 
-Previous result: {self.last_result if self.last_result else 'Starting...'}
-Errors so far: {'; '.join(self.error_history[-3:]) if self.error_history else 'None'}
-{warning}
-
-Step {self.steps_taken}/{self.max_steps}. What should I do next?
-Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{}}, "done": bool}}"""
+Step {self.steps_taken}/{self.max_steps}. Next action?
+JSON: {{"thought":"...","action":"tool","args":{{}},"done":false}}"""
 
             try:
                 raw = llm_call(prompt, system=self.system_prompt)
@@ -99,34 +61,37 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
                 args = response.get("args", {})
                 thought = response.get("thought", "")
 
-                if self._is_repeating(tool, args):
+                if tool == self.last_tool and tool != "done":
                     if self.c:
-                        self.cprint(f"  [yellow]Breaking repeat cycle: {tool} called too many times[/]")
-                    self.last_result = "That tool was already called recently. Try a different approach."
+                        self.cprint(f"  [yellow]Repeating {tool} — forcing different approach[/]")
+                    self.last_result = f"Already used {tool}. Try a different tool."
                     continue
 
-                self.action_history.append((tool, str(sorted(args.items()))))
+                self.last_tool = tool
 
                 if self.c:
                     self.cprint(f"  [dim]> {thought}[/]")
 
                 if tool == "ask_user":
                     if self.auto_yes:
-                        self.last_result = "User skipped (auto_yes mode)"
+                        self.last_result = "User skipped"
                     else:
                         user_input = self._ask_user(
                             args.get("question", ""),
                             args.get("secret", False)
                         )
-                        self.last_result = f"User responded: {user_input[:200]}"
+                        self.last_result = f"User: {user_input[:200]}"
                     continue
 
                 if tool in tools:
                     try:
                         result = tools[tool](self.project_path, args)
-                        self.last_result = result.get("_text", str(result)[:2000])
+                        text = result.get("_text", str(result)[:2000])
+                        if not text or text.startswith("File not found"):
+                            text = f"{tool}: no content — try a different file"
+                        self.last_result = text[:1500]
                     except Exception as e:
-                        self.last_result = f"Tool error: {e}"
+                        self.last_result = f"{tool} error: {e}"
                         self.error_history.append(f"{tool}: {e}")
                 else:
                     self.last_result = f"Unknown tool: {tool}"
@@ -147,7 +112,6 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
     def _parse_response(self, raw: str) -> dict | None:
         response = raw.strip()
         if not response:
-            self.cprint(f"  [yellow]Agent: empty response[/]")
             return None
 
         if response.startswith("```"):
@@ -175,7 +139,6 @@ Respond with JSON: {{"thought": "...", "action": "tool_name or done", "args": {{
             except json.JSONDecodeError:
                 pass
 
-        self.cprint(f"  [yellow]Agent: could not parse JSON, retrying...[/]")
         return None
 
     def _ask_user(self, question: str, secret: bool = False) -> str:

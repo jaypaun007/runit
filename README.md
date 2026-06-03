@@ -41,17 +41,16 @@ That's it. Runit clones the repo, reads the code, installs dependencies (pip/npm
 ┌─────────────────────────────────────────────────────────────────┐
 │  runit https://github.com/user/repo                             │
 │                                                                 │
-│  ┌──────────┐   ┌──────────┐   ┌───────────────────────────┐  │
-│  │ Analyze  │ → │ Services │ → │   Agent Runtime (AI)      │  │
-│  │          │   │          │   │  • read code + README      │  │
-│  │ detect   │   │ install  │   │  • install deps on demand  │  │
-│  │ language │   │ postgres │   │  • build                   │  │
-│  │ services │   │ redis    │   │  • configure env vars      │  │
-│  │ .env     │   │ mysql    │   │  • run project             │  │
-│  └──────────┘   └──────────┘   │  • detect all ports        │  │
-│                                 │  • verify it works         │  │
-│                                 └──────────┬────────────────┘  │
-│                                            ↓                   │
+│  ┌──────────┐   ┌──────────┐   ┌───────────┐   ┌───────────┐  │
+│  │ Analyze  │ → │ Services │ → │ Env UI    │ → │ Agent Run │  │
+│  │          │   │          │   │ (web form) │   │           │  │
+│  │ detect   │   │ install  │   │           │   │ install   │  │
+│  │ language │   │ postgres │   │ tunneled  │   │ deps      │  │
+│  │ services │   │ redis    │   │ via       │   │ build     │  │
+│  │ .env     │   │ mysql    │   │ cloud-    │   │ run       │  │
+│  └──────────┘   └──────────┘   │ flared    │   │ verify    │  │
+│                                 └───────────┘   └─────┬─────┘  │
+│                                                        ↓       │
 │                                 ┌────────────────────────┐     │
 │                                 │  Dashboard + Tunnels   │     │
 │                                 │  • cloudflared URLs    │     │
@@ -67,6 +66,12 @@ Detects language, package manager, services needed, env vars — all rule-based,
 
 ### 2. Services (deterministic)
 Installs required services with a 3-tier fallback chain:
+
+### 3. Env Web UI (notebook)
+Opens an HTTP form tunneled via cloudflared. Users fill in env vars through their browser — API keys, database URLs, secrets. All values pre-filled from `.env`/`os.environ`. Works in Kaggle, Colab, any headless environment. Ctrl+C to skip.
+
+### 4. Agent Runtime (AI-driven)
+An autonomous AI agent takes over with full system access. Key files (README, configs, entry points) are pre-read and passed directly — the agent doesn't waste steps reading them. It just installs dependencies, builds, runs, and reports back.
 
 | Service | Tier 1: Docker | Tier 2: apt-get | Tier 3: Binary |
 |---------|---------------|-----------------|----------------|
@@ -203,13 +208,13 @@ runit/
 |--------|-------------------|---------------------|-----------------|
 | Analysis | AI decides everything | Rule-based only | Rule-based (free) |
 | Services | Docker-required | apt / binary | apt / binary + credentials |
-| Env vars | Manual prompting | Auto-fill + web UI + AI | Pass-through + web UI for critical |
-| Runtime | Agent plans everything | Fixed 5-step pipeline | Agent adapts on-demand |
+| Env vars | Manual prompting | Auto-fill + web UI + AI | Pass-through + web UI |
+| Runtime | Agent plans everything | Fixed 5-step pipeline | Agent run (pre-fed files) |
 | Ports | None | First port only | All ports tunneled |
-| Speed | Slow (looping) | Fast | Fast (agent only at runtime) |
-| Token cost | High | Low | Low (runtime only) |
+| Speed | Slow (looping) | Fast | Fast (short prompts) |
+| Token cost | High | Low | Very low (minimal context) |
 | Docker | Required | Optional | Optional |
-| Kaggle/Colab | Broken | Works | Works |
+| Kaggle/Colab | Broken | Works | Works + web UI for env |
 
 **v2.1.2 gives the AI agent freedom at runtime but keeps the web UI for env vars — best of both worlds.**
 
