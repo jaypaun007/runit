@@ -241,6 +241,7 @@ def tool_run_command(project_path: str, args: dict) -> dict:
     cmd = args.get("command", "") or args.get("cmd", "")
     cwd = args.get("cwd") or project_path
     timeout = args.get("timeout", 180)
+    print(f"  \U0001f4bb  {cmd[:200]}")
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
@@ -248,13 +249,18 @@ def tool_run_command(project_path: str, args: dict) -> dict:
         )
         output = result.stdout or ""
         if result.stderr:
-            output += "\nSTDERR:\n" + result.stderr[-2000:]
+            stderr = result.stderr[-2000:]
+            if stderr.strip():
+                output += "\nSTDERR:\n" + stderr
         if result.returncode != 0:
             output += f"\n(exit code: {result.returncode})"
+        tail = output[-3000:]
+        if tail.strip() and result.returncode == 0:
+            print(f"    \u2b07  {tail[:500].strip()}")
         return {
             "ok": result.returncode == 0,
             "returncode": result.returncode,
-            "output": output[-3000:],
+            "output": tail,
             "_text": output[-1500:],
         }
     except subprocess.TimeoutExpired:
@@ -309,11 +315,14 @@ def tool_run_project(project_path: str, args: dict) -> dict:
         pm = ProcessMonitor(project_path)
         _shared_state["process_monitor"] = pm
 
+    print(f"  \U000025b6  {cmd[:200]}")
     result = pm.detect_server_url(cmd, env=env)
     if result.get("ok"):
+        msg = f"Running: PID {result.get('pid')}, URL: {result.get('url', 'unknown')}"
+        print(f"    \u2705  {msg}")
         return {"ok": True, "pid": result.get("pid"), "port": result.get("port"),
                 "url": result.get("url"), "logfile": result.get("logfile"),
-                "_text": f"Running: PID {result.get('pid')}, URL: {result.get('url', 'unknown')}"}
+                "_text": msg}
     return {"ok": False, "error": result.get("error", "Failed to start"), "_text": result.get("error", "Failed")}
 
 

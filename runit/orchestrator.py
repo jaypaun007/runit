@@ -174,64 +174,20 @@ class Pipeline:
         env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
         print(f"    \u2705  Written {len(self.env_vars)} vars to .env")
 
-        critical_missing = [v for v in all_vars if is_critical(v) and not self.env_vars.get(v)]
-
-        if self.auto_yes and is_notebook_env() and all_vars:
+        if is_notebook_env():
             self._env_web_ui(all_vars)
             env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
-        elif not self.auto_yes and critical_missing:
-            if is_notebook_env():
-                self._env_web_ui(all_vars)
-            else:
-                for var in critical_missing:
-                    try:
-                        val = input(f"  \U0001f511  Enter {var}: ")
-                        if val.strip():
-                            self.env_vars[var] = val.strip()
-                    except (EOFError, KeyboardInterrupt):
-                        pass
+        elif not self.auto_yes:
+            critical_missing = [v for v in all_vars if is_critical(v) and not self.env_vars.get(v)]
+            for var in critical_missing:
+                try:
+                    val = input(f"  \U0001f511  Enter {var}: ")
+                    if val.strip():
+                        self.env_vars[var] = val.strip()
+                except (EOFError, KeyboardInterrupt):
+                    pass
             env_file.write_text("\n".join(f"{k}={v}" for k, v in self.env_vars.items()) + "\n")
 
-    def _env_ui_form_html(self, var_names):
-        rows = []
-        for v in var_names:
-            current = self.env_vars.get(v, "")
-            val_attr = f' value="{current}"' if current else ""
-            rows.append(f"""
-        <div class="field">
-          <label for="{v}">{v}</label>
-          <input id="{v}" name="{v}" type="text"{val_attr}>
-        </div>""")
-        return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Runit - Set Environment Variables</title>
-<style>
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font:16px/1.5 system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}}
-  .card{{background:#1e293b;padding:2rem;border-radius:12px;width:90%;max-width:520px}}
-  h1{{font-size:1.3rem;margin-bottom:.25rem}}
-  p{{color:#94a3b8;margin-bottom:1.5rem;font-size:.9rem}}
-  .field{{margin-bottom:1rem}}
-  label{{display:block;font-size:.8rem;font-weight:600;color:#94a3b8;margin-bottom:.3rem;word-break:break-all}}
-  input{{width:100%;padding:.6rem .8rem;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:.9rem;outline:none;transition:border-color .15s}}
-  input:focus{{border-color:#6366f1}}
-  button{{width:100%;padding:.7rem;background:#6366f1;border:none;border-radius:8px;color:#fff;font-size:.95rem;font-weight:600;cursor:pointer;margin-top:.5rem}}
-  button:hover{{background:#4f46e5}}
-  .small{{font-size:.75rem;color:#64748b;text-align:center;margin-top:1rem}}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>⚡ Runit — Environment Variables</h1>
-  <p>Fill the <strong>{len(var_names)}</strong> required variables, then click Save.</p>
-  <form method="POST" action="/">{"".join(rows)}
-    <button type="submit">Save &amp; Continue</button>
-  </form>
-  <div class="small">Values already set are pre-filled. Edit or leave as-is.</div>
-</div>
-</body>
-</html>"""
 
     def _env_web_ui(self, var_names):
         result_file = Path(self.project_path) / ".runit" / "env_ui_result.json"
@@ -334,14 +290,7 @@ class Pipeline:
         server.shutdown()
 
     def _resolve_env_pass(self):
-        env_path = Path(self.project_path) / ".env.example"
-        if not env_path.exists():
-            return {}
         result = {}
-        for line in env_path.read_text().splitlines():
-            if "=" in line and not line.strip().startswith("#"):
-                key, _, val = line.partition("=")
-                result[key.strip()] = val.strip().strip("\"'")
         existing = Path(self.project_path) / ".env"
         if existing.exists():
             for line in existing.read_text().splitlines():
@@ -375,6 +324,10 @@ class Pipeline:
         project_files = self._read_key_files()
         suggested_cmd = self._suggest_run_command(project_files)
 
+        from runit.environment import detect_env, kaggle_working_dir
+        env_type = detect_env()
+        kwd = kaggle_working_dir()
+
         agent = AgentCore(
             self.project_path, console=self.c, auto_yes=self.auto_yes,
             max_steps=self.max_retries,
@@ -383,14 +336,17 @@ class Pipeline:
 
         task = f"""Project: {self.project_path}
 Type: {self.project_type} | PM: {self.package_manager}
+Environment: {env_type}
+Working dir: {kwd or self.project_path}
 Services: {json.dumps(services_info)}
-Env: {json.dumps(env)[:1000]}
+Env vars: {json.dumps(env)[:1000]}
 Key files: {json.dumps(project_files)[:3000]}
 
-Run it.
-- Already have key files above, do NOT read them again
-- {suggested_cmd or "Figure out and run the start command"}
-- Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}}) when running"""
+Run this project.
+- Key files are above — do NOT re-read them
+- {suggested_cmd or "Find and run the start command"}
+- Show all commands you run
+- Call done({{"ok":true,"urls":["http://localhost:PORT"],"pids":[PID]}}) when serving"""
 
         from runit.agent_tools import TOOLS
         result = agent.run(task, TOOLS)

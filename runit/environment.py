@@ -1,6 +1,7 @@
 import os
 import sys
 import shutil
+from pathlib import Path
 
 
 def is_kaggle() -> bool:
@@ -21,6 +22,19 @@ def is_notebook_env() -> bool:
     return is_kaggle() or is_colab()
 
 
+def kaggle_working_dir() -> str | None:
+    if is_kaggle():
+        return "/kaggle/working"
+    return None
+
+
+def project_working_dir(project_path: str) -> str:
+    kwd = kaggle_working_dir()
+    if kwd and kwd in project_path:
+        return kwd
+    return str(Path(project_path).parent)
+
+
 def has_docker() -> bool:
     return shutil.which("docker") is not None
 
@@ -34,6 +48,7 @@ def has_npm() -> bool:
 
 
 def env_info() -> dict:
+    from pathlib import Path
     info = {
         "platform": sys.platform,
         "python": sys.version,
@@ -43,6 +58,7 @@ def env_info() -> dict:
         "has_git": has_git(),
         "has_npm": has_npm(),
         "cwd": os.getcwd(),
+        "kaggle_working": kaggle_working_dir(),
     }
     return info
 
