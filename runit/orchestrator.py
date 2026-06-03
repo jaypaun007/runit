@@ -363,34 +363,60 @@ class Pipeline:
 
     def _deterministic_run(self, files: dict, suggested_cmd: str) -> dict:
         install_cmd = self._detect_install_cmd(files)
+        install_ok = True
 
         if install_cmd:
             print(f"  \U0001f4e6  Installing dependencies...")
             r = self._run_cmd(install_cmd, timeout=300)
-            if not r.get("ok") and "not found" in r.get("error", "") + r.get("output", ""):
-                alt = self._fallback_install(install_cmd)
-                if alt:
-                    self._run_cmd(alt, timeout=300)
+            if not r.get("ok"):
+                print(f"  \u26a0\ufe0f  pip failed — trying to fix...")
+                r = self._fix_and_install(files)
+                if not r.get("ok"):
+                    print(f"  \u26a0\ufe0f  Some deps may be missing, continuing anyway...")
+                    install_ok = False
 
-        if suggested_cmd:
+        run_cmd = suggested_cmd or self._detect_run_cmd(files)
+        if run_cmd:
             print(f"  \U000025b6  Starting project...")
-            return self._run_project_in_background(suggested_cmd)
-
-        if "main.py" in files or "app.py" in files or "app/main.py" in files:
-            for f in ["app/main.py", "main.py", "app.py"]:
-                if f in files:
-                    content = files[f]
-                    if "FastAPI" in content or "fastapi" in content.lower():
-                        prefix = f.rsplit(".", 1)[0].replace("/", ".")
-                        cmd = f"uvicorn {prefix}:app --host 0.0.0.0 --port 8000"
-                        return self._run_project_in_background(cmd)
-                    if "flask" in content.lower():
-                        cmd = f"python {f}"
-                        return self._run_project_in_background(cmd)
-                    cmd = f"python {f}"
-                    return self._run_project_in_background(cmd)
+            result = self._run_project_in_background(run_cmd)
+            if not result.get("ok") and install_ok:
+                return self._ai_fix_run(result.get("error", ""), files, run_cmd)
+            return result
 
         return {"ok": False, "error": "No run command detected"}
+
+    def _fix_and_install(self, files: dict) -> dict:
+        req_path = Path(self.project_path) / "requirements.txt"
+        if not req_path.exists():
+            return {"ok": False, "error": "No requirements.txt"}
+        lines = [l.strip() for l in req_path.read_text().splitlines()
+                 if l.strip() and not l.startswith("#")]
+        bad_pkgs = []
+        good_pkgs = []
+        for line in lines:
+            pkg = re.split(r'[=<>~!]', line)[0].strip()
+            if pkg.lower() in ("install",):
+                bad_pkgs.append(line)
+            else:
+                good_pkgs.append(line)
+        if bad_pkgs:
+            print(f"    \u26a0\ufe0f  Skipping bad packages: {', '.join(bad_pkgs)}")
+            req_path.write_text("\n".join(good_pkgs) + "\n")
+        return self._run_cmd("pip install -r requirements.txt -q", timeout=300)
+
+    def _detect_run_cmd(self, files: dict) -> str | None:
+        for f in ["app/main.py", "main.py", "app.py", "manage.py"]:
+            if f in files:
+                content = files[f]
+                if "FastAPI" in content or "fastapi" in content.lower():
+                    prefix = f.rsplit(".", 1)[0].replace("/", ".")
+                    return f"uvicorn {prefix}:app --host 0.0.0.0 --port 8000"
+                if "flask" in content.lower():
+                    return f"python {f}"
+                if "django" in content.lower() or "manage.py" == f:
+                    return f"python {f} runserver 0.0.0.0:8000"
+                return f"python {f}"
+        return None
 
     def _detect_install_cmd(self, files: dict) -> str | None:
         if "requirements.txt" in files:
@@ -514,8 +540,8 @@ Error: {error[:1000]}
 Files: {json.dumps(list(files.keys()))}
 Suggested cmd: {suggested_cmd}
 
-Analyze the error and return:
-{{"install":"pip command to fix","run":"correct run command","fix":"what went wrong"}}
+Analyze the error. Return ONLY JSON:
+{{"install":"pip install command (no cd, just pkg names)","run":"run command (no cd, full absolute path or module)","fix":"brief explanation"}}
 
 JSON only, no markdown:"""
         try:
