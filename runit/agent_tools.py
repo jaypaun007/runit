@@ -431,6 +431,61 @@ def tool_notify(project_path: str, args: dict) -> dict:
     return {"ok": True, "_text": f"Notified: {msg[:100]}"}
 
 
+# ── New v2.1.2 Tools ──
+
+def tool_delete_file(project_path: str, args: dict) -> dict:
+    path = args.get("path", "")
+    full = Path(project_path) / path if not path.startswith("/") else Path(path)
+    try:
+        if not full.exists():
+            return {"ok": False, "error": f"File not found: {full}", "_text": f"File not found: {full}"}
+        full.unlink()
+        return {"ok": True, "_text": f"Deleted: {full}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "_text": f"Error deleting: {e}"}
+
+
+def tool_web_search(project_path: str, args: dict) -> dict:
+    query = args.get("query", "") or args.get("q", "")
+    if not query:
+        return {"ok": False, "error": "No query", "_text": "No query provided"}
+    try:
+        result = web_search(query)
+        return {"ok": True, "result": result, "_text": str(result)[:2000]}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "_text": f"Search error: {e}"}
+
+
+def tool_detect_ports(project_path: str, args: dict) -> dict:
+    try:
+        r = subprocess.run(
+            ["ss", "-tlnp"],
+            capture_output=True, text=True, timeout=10
+        )
+        ports = re.findall(r":(\d+)", r.stdout)
+        return {"ok": True, "ports": ports, "raw": r.stdout, "_text": f"Open ports: {', '.join(ports[:20])}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "_text": f"Port detection error: {e}"}
+
+
+def tool_read_logs(project_path: str, args: dict) -> dict:
+    log_path = args.get("path", "") or args.get("logfile", "")
+    lines_n = args.get("lines", 50)
+    if not log_path:
+        return {"ok": False, "error": "No log path", "_text": "No log path provided"}
+    full = Path(log_path) if log_path.startswith("/") else Path(project_path) / log_path
+    try:
+        if not full.exists():
+            return {"ok": False, "error": f"Log not found: {full}", "_text": f"Log not found: {full}"}
+        r = subprocess.run(
+            ["tail", f"-{lines_n}", str(full)],
+            capture_output=True, text=True, timeout=10
+        )
+        return {"ok": True, "content": r.stdout, "_text": r.stdout[:2000]}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "_text": f"Log read error: {e}"}
+
+
 # ── Tool Registry ──
 
 TOOLS = {
@@ -454,7 +509,11 @@ TOOLS = {
     "wait_for_port": tool_wait_for_port,
     "edit_file": tool_edit_file,
     "write_file": tool_write_file,
+    "delete_file": tool_delete_file,
     "patch_file": tool_patch_file,
+    "web_search": tool_web_search,
+    "detect_ports": tool_detect_ports,
+    "read_logs": tool_read_logs,
     "ask_user": tool_ask_user,
     "notify": tool_notify,
 }
